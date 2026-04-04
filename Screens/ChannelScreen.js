@@ -16,14 +16,16 @@ export default function ChannelScreen() {
   const channelName = channelData?.channel || paramChannelName || 'YouTube Channel';
   const channelAvatar = channelData?.avatar || paramAvatar || 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Circle-icons-profile.svg';
 
-  const [activeTab, setActiveTab] = useState('Home');
+  // ডিফল্টভাবে Videos ট্যাব সিলেক্ট করা হলো
+  const [activeTab, setActiveTab] = useState('Videos');
   const [loading, setLoading] = useState(true);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [thumbQuality, setThumbQuality] = useState('High');
   const [channelBanner, setChannelBanner] = useState('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop');
   const [subscriberCount, setSubscriberCount] = useState('N/A');
 
-  const [tabData, setTabData] = useState({ Home: [], Videos: [], Shorts: [], Live: [], Playlists: [], Posts: [] });
+  // শুধুমাত্র Videos এবং Shorts রাখা হলো
+  const [tabData, setTabData] = useState({ Videos: [], Shorts: [] });
 
   useEffect(() => {
     fetchChannelData();
@@ -47,10 +49,13 @@ export default function ChannelScreen() {
   const extractChannelDataRecursively = (node, categorizedData) => {
     const parseVid = (vid) => {
       const duration = vid.lengthText?.simpleText || '';
+      const publishedTime = vid.publishedTimeText?.simpleText || ''; // আপলোড সময়
+      
       return {
         id: String(vid.videoId),
         title: String(vid.title?.runs?.[0]?.text || 'No Title'),
-        views: String(vid.viewCountText?.simpleText || 'N/A'),
+        views: String(vid.viewCountText?.simpleText || vid.shortViewCountText?.simpleText || 'N/A'),
+        publishedTime: String(publishedTime),
         duration: String(duration),
         thumbnail: thumbQuality === 'Data Saver' ? `https://i.ytimg.com/vi/${vid.videoId}/mqdefault.jpg` : `https://i.ytimg.com/vi/${vid.videoId}/hqdefault.jpg`,
         channel: channelName,
@@ -64,17 +69,19 @@ export default function ChannelScreen() {
       if ((node.videoRenderer && node.videoRenderer.videoId) || (node.gridVideoRenderer && node.gridVideoRenderer.videoId)) {
         const target = node.videoRenderer || node.gridVideoRenderer;
         const parsedVid = parseVid(target);
-        if (parsedVid.duration.length > 0 && parsedVid.duration.length <= 4) categorizedData.Shorts.push(parsedVid);
+        if (parsedVid.duration.length > 0 && parsedVid.duration.length <= 5) categorizedData.Shorts.push(parsedVid);
         else categorizedData.Videos.push(parsedVid);
-        categorizedData.Home.push(parsedVid); 
       } else if (node.reelItemRenderer && node.reelItemRenderer.videoId) {
         const parsedShort = {
-          id: String(node.reelItemRenderer.videoId), title: String(node.reelItemRenderer.headline?.simpleText || 'Short Video'),
+          id: String(node.reelItemRenderer.videoId), 
+          title: String(node.reelItemRenderer.headline?.simpleText || 'Short Video'),
           views: String(node.reelItemRenderer.viewCountText?.simpleText || 'N/A'),
           thumbnail: thumbQuality === 'Data Saver' ? `https://i.ytimg.com/vi/${node.reelItemRenderer.videoId}/mqdefault.jpg` : `https://i.ytimg.com/vi/${node.reelItemRenderer.videoId}/hqdefault.jpg`,
-          channel: channelName, avatar: channelAvatar, duration: 'Short'
+          channel: channelName, 
+          avatar: channelAvatar, 
+          duration: 'Short'
         };
-        categorizedData.Shorts.push(parsedShort); categorizedData.Home.push(parsedShort);
+        categorizedData.Shorts.push(parsedShort);
       } else {
         Object.values(node).forEach(child => extractChannelDataRecursively(child, categorizedData));
       }
@@ -105,8 +112,6 @@ export default function ChannelScreen() {
         if (channelRenderer) {
           const urlPath = channelRenderer.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url;
           if (urlPath) targetUrl = `https://www.youtube.com${urlPath}`;
-          setSubscriberCount(channelRenderer.subscriberCountText?.simpleText || '');
-          if (channelRenderer.tvBanner?.thumbnails?.[0]?.url) setChannelBanner(channelRenderer.tvBanner.thumbnails[0].url);
         }
       }
 
@@ -114,12 +119,22 @@ export default function ChannelScreen() {
       const channelHtml = await channelResponse.text();
       let channelMatch = channelHtml.match(/ytInitialData\s*=\s*({.+?});/) || channelHtml.match(/var ytInitialData = (.*?);<\/script>/);
 
-      const categorizedData = { Home: [], Videos: [], Shorts: [], Live: [], Playlists: [], Posts: [] };
+      const categorizedData = { Videos: [], Shorts: [] };
       if (channelMatch && channelMatch[1]) {
-         extractChannelDataRecursively(JSON.parse(channelMatch[1]), categorizedData);
-         const uniqueHome = []; const map = new Map();
-         for (const item of categorizedData.Home) { if(!map.has(item.id)){ map.set(item.id, true); uniqueHome.push(item); } }
-         categorizedData.Home = uniqueHome;
+         const parsedData = JSON.parse(channelMatch[1]);
+         
+         // ব্যানার এবং সাবস্ক্রাইবার সংখ্যা বের করার লজিক
+         const headerRenderer = parsedData?.header?.c4TabbedHeaderRenderer || parsedData?.header?.pageHeaderRenderer;
+         if (headerRenderer) {
+           const banners = headerRenderer.banner?.thumbnails || headerRenderer.pageHeaderBanner?.pageHeaderBannerImageViewModel?.image?.sources;
+           if (banners && banners.length > 0) {
+             setChannelBanner(banners[banners.length - 1].url);
+           }
+           const subsText = headerRenderer.subscriberCountText?.simpleText || headerRenderer.pageHeaderViewModel?.metadata?.metadataRows?.[1]?.metadataParts?.[0]?.text?.content;
+           if (subsText) setSubscriberCount(subsText);
+         }
+
+         extractChannelDataRecursively(parsedData, categorizedData);
       }
       setTabData(categorizedData);
     } catch (error) {} finally { setLoading(false); }
@@ -144,9 +159,15 @@ export default function ChannelScreen() {
   const renderItem = ({ item }) => {
     if (activeTab === 'Shorts') {
       return (
-        <TouchableOpacity style={styles.shortGridItem} activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item, isShorts: true })}>
+        <TouchableOpacity style={styles.shortGridItem} activeOpacity={0.8} onPress={() => navigation.navigate('ShortsScreen', { videoId: item.id, videoData: item })}>
           <Image source={{ uri: item.thumbnail }} style={styles.shortGridImage} />
-          <View style={styles.shortViewsOverlay}><Ionicons name="play-outline" size={14} color="#FFF" /><Text style={styles.shortViewsText}>{item.views}</Text></View>
+          <View style={styles.shortViewsOverlay}>
+            <Ionicons name="play-outline" size={14} color="#FFF" />
+            <Text style={styles.shortViewsText}>{item.views}</Text>
+          </View>
+          <View style={{ padding: 8, paddingBottom: 12 }}>
+            <Text style={styles.shortTitle} numberOfLines={2}>{item.title}</Text>
+          </View>
         </TouchableOpacity>
       );
     }
@@ -159,7 +180,7 @@ export default function ChannelScreen() {
         <View style={styles.videoInfoContainer}>
           <TouchableOpacity style={styles.videoTextContainer} activeOpacity={0.8} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
             <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-            <Text style={styles.videoMeta}>{item.views}</Text>
+            <Text style={styles.videoMeta}>{item.views} {item.publishedTime ? `• ${item.publishedTime}` : ''}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -185,7 +206,12 @@ export default function ChannelScreen() {
       </View>
 
       <View style={styles.tabScrollContainer}>
-        <FlatList horizontal showsHorizontalScrollIndicator={false} data={['Home', 'Videos', 'Shorts', 'Live', 'Playlists']} keyExtractor={(item) => item} renderItem={({ item }) => (
+        <FlatList 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          data={['Videos', 'Shorts']} 
+          keyExtractor={(item) => item} 
+          renderItem={({ item }) => (
             <TouchableOpacity style={[styles.tabButton, activeTab === item && styles.activeTabButton]} onPress={() => setActiveTab(item)}>
               <Text style={[styles.tabText, activeTab === item && styles.activeTabText]}>{item}</Text>
             </TouchableOpacity>
@@ -200,10 +226,24 @@ export default function ChannelScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIcon}><Ionicons name="arrow-back" size={24} color="#FFF" /></TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIcon}>
+           <Ionicons name="arrow-back" size={24} color="#FFF" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{channelName}</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Home')} style={styles.headerIcon}>
+           <Ionicons name="home" size={22} color="#FFF" />
+        </TouchableOpacity>
       </View>
-      <FlatList key={activeTab === 'Shorts' ? 'grid-3' : 'list-1'} numColumns={activeTab === 'Shorts' ? 3 : 1} data={tabData[activeTab] || []} renderItem={renderItem} keyExtractor={(item, index) => item.id + index.toString()} ListHeaderComponent={ChannelHeader} showsVerticalScrollIndicator={false} />
+      
+      <FlatList 
+        key={activeTab === 'Shorts' ? 'grid-2' : 'list-1'} 
+        numColumns={activeTab === 'Shorts' ? 2 : 1} 
+        data={tabData[activeTab] || []} 
+        renderItem={renderItem} 
+        keyExtractor={(item, index) => item.id + index.toString()} 
+        ListHeaderComponent={ChannelHeader} 
+        showsVerticalScrollIndicator={false} 
+      />
     </SafeAreaView>
   );
 }
@@ -237,8 +277,9 @@ const styles = StyleSheet.create({
   videoTextContainer: { flex: 1, paddingRight: 10 },
   videoTitle: { color: '#FFF', fontSize: 15, fontWeight: '500', marginBottom: 4, lineHeight: 20 },
   videoMeta: { color: '#AAA', fontSize: 12 },
-  shortGridItem: { width: (width / 3) - 2, height: 220, margin: 1, position: 'relative', backgroundColor: '#222' },
-  shortGridImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  shortViewsOverlay: { position: 'absolute', bottom: 5, left: 5, flexDirection: 'row', alignItems: 'center' },
-  shortViewsText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 3, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 }
+  shortGridItem: { width: (width / 2) - 10, margin: 5, position: 'relative', backgroundColor: '#111', borderRadius: 8, overflow: 'hidden' },
+  shortGridImage: { width: '100%', height: 250, resizeMode: 'cover' },
+  shortViewsOverlay: { position: 'absolute', bottom: 55, left: 5, flexDirection: 'row', alignItems: 'center' },
+  shortViewsText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 3, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 2 },
+  shortTitle: { color: '#FFF', fontSize: 13, fontWeight: '500', lineHeight: 18 }
 });
