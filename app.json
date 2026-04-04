@@ -24,23 +24,22 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.imtiaz.biodigitaltruth"
+      "package": "com.imtiaz.biodigitaltruth",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-av",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "extraMavenRepos": [
-              "https://jitpack.io"
-            ]
-          }
-        }
-      ]
-    ]
+      "expo-av"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a5942e98-301a-46a1-9764-ae52f7a3f69a"
+      }
+    }
   }
 }

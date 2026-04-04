@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
@@ -10,7 +10,8 @@ import PlaylistScreen from './screens/PlaylistPage';
 import ShortsScreen from './screens/ShortsScreen';
 import HistoryPage from './Settings/HistoryPage'; 
 // নতুন যুক্ত করা Subscriptions স্ক্রিনটি ইমপোর্ট করা হলো
-import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
+import SubscriptionsScreen from './screens/SubscriptionsScreen';
+
 
 const Stack = createStackNavigator();
 
@@ -24,10 +25,7 @@ export default function App() {
         <Stack.Screen name="Playlist" component={PlaylistScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
-        
-        {/* Subscriptions স্ক্রিনটি ঠিক এইখানে Navigator-এর ভেতরে থাকতে হবে */}
         <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-        
       </Stack.Navigator>
     </NavigationContainer>
   );
