@@ -1,141 +1,124 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, ScrollView } from 'react-native';
-import { Video, Audio } from 'expo-av';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { usePlayerStore } from './PlayerStore';
 
 const { width } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16;
+const MY_API_SERVER = "http://127.0.0.1:10000";
 
-export default function GlobalVideoPlayer() {
-  const { videoId, videoData, videoUrl, audioUrl, streamMode, playerState, setPlayerState, closePlayer, captions, selectedCC, setSelectedCC } = usePlayerStore();
-  const videoRef = useRef(null);
-  const audioRef = useRef(new Audio.Sound());
+export default function GlobalPlayer() {
   const navigation = useNavigation();
-  
+  const videoRef = useRef(null);
+  const [playerState, setPlayerState] = useState('hidden'); // 'hidden', 'full', 'mini'
+  const [videoData, setVideoData] = useState(null);
+  const [streamUrl, setStreamUrl] = useState(null);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [showCCMenu, setShowCCMenu] = useState(false);
 
   useEffect(() => {
-    const loadAudio = async () => {
-      if (streamMode === 'separate' && audioUrl) {
-        try {
-          await audioRef.current.unloadAsync();
-          await audioRef.current.loadAsync({ uri: audioUrl }, { shouldPlay: isPlaying });
-        } catch (e) {}
+    // ভিডিও প্লে করার কমান্ড রিসিভ করা
+    const playSubscription = DeviceEventEmitter.addListener('playVideo', async (data) => {
+      if (videoData?.id === data.videoId) {
+          setPlayerState('full');
+          return;
       }
-    };
-    if (videoId) loadAudio();
-    return () => { audioRef.current.unloadAsync(); };
-  }, [videoId, audioUrl]);
+      setVideoData(data.videoData);
+      setPlayerState('full');
+      setStreamUrl(null);
+      setIsPlaying(true);
 
-  const handlePlaybackStatusUpdate = async (status) => {
-    if (streamMode === 'separate' && status.isLoaded) {
-        const audioStatus = await audioRef.current.getStatusAsync();
-        if (!audioStatus.isLoaded) return;
-        if (status.isPlaying && !audioStatus.isPlaying) await audioRef.current.playAsync();
-        else if (!status.isPlaying && audioStatus.isPlaying) await audioRef.current.pauseAsync();
-        if (status.isPlaying && Math.abs(status.positionMillis - audioStatus.positionMillis) > 500) {
-            await audioRef.current.setPositionAsync(status.positionMillis);
-        }
+      try {
+        const targetUrl = `https://www.youtube.com/watch?v=${data.videoId}`;
+        const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&quality=720&t=${Date.now()}`;
+        const res = await fetch(apiUrl);
+        const json = await res.json();
+        if(json.success && json.url) setStreamUrl(json.url);
+      } catch(e) { console.error(e); }
+    });
+
+    // ভিডিও মিনিমাইজ করার কমান্ড রিসিভ করা
+    const minimizeSubscription = DeviceEventEmitter.addListener('minimizeVideo', () => {
+      setPlayerState('mini');
+    });
+
+    return () => { 
+        playSubscription.remove(); 
+        minimizeSubscription.remove(); 
     }
-  };
+  }, [videoData]);
 
-  if (playerState === 'hidden' || !videoUrl) return null;
+  if (playerState === 'hidden') return null;
 
-  const handleClose = async () => {
-      if (videoRef.current) await videoRef.current.pauseAsync();
-      await audioRef.current.unloadAsync();
-      closePlayer();
-  };
-
-  const togglePlayPause = async () => {
-     if (videoRef.current) {
-        const status = await videoRef.current.getStatusAsync();
-        if (status.isPlaying) {
-            await videoRef.current.pauseAsync();
-            if(streamMode === 'separate') await audioRef.current.pauseAsync();
-            setIsPlaying(false);
-        } else {
-            await videoRef.current.playAsync();
-            if(streamMode === 'separate') await audioRef.current.playAsync();
-            setIsPlaying(true);
-        }
+  const togglePlay = async () => {
+     if (!videoRef.current) return;
+     const status = await videoRef.current.getStatusAsync();
+     if (status.isPlaying) { 
+         await videoRef.current.pauseAsync(); 
+         setIsPlaying(false); 
+     } else { 
+         await videoRef.current.playAsync(); 
+         setIsPlaying(true); 
      }
   };
 
-  const expandPlayer = () => {
-     setPlayerState('full');
-     navigation.navigate('Player', { videoId, videoData });
+  const closePlayer = async () => {
+     if (videoRef.current) await videoRef.current.pauseAsync();
+     setPlayerState('hidden');
+     setVideoData(null);
+     setStreamUrl(null);
   };
 
+  // Full Screen Mode (Player Screen এর উপরে বসবে)
   if (playerState === 'full') {
-      return (
-          <View style={styles.fullMode} pointerEvents="box-none">
-             <Video 
-                ref={videoRef} source={{ uri: videoUrl, textTracks: selectedCC ? [{ title: selectedCC.label, language: selectedCC.language, type: 'text/vtt', uri: selectedCC.uri }] : [] }} 
-                style={styles.fullVideo} useNativeControls resizeMode="contain" shouldPlay isMuted={streamMode === 'separate'} 
-                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                selectedTextTrack={selectedCC ? { type: "language", value: selectedCC.language } : { type: "disabled" }}
-              />
-              
-              {captions.length > 0 && (
-                <TouchableOpacity style={styles.ccBtn} onPress={() => setShowCCMenu(!showCCMenu)}>
-                  <Ionicons name="subtitles" size={24} color={selectedCC ? "#3EA6FF" : "#FFF"} />
-                </TouchableOpacity>
-              )}
-
-              {showCCMenu && (
-                <View style={styles.ccMenu}>
-                  <Text style={styles.menuTitle}>Captions / Translation</Text>
-                  <ScrollView>
-                    <TouchableOpacity style={styles.menuItem} onPress={() => { setSelectedCC(null); setShowCCMenu(false); }}>
-                      <Text style={{color: !selectedCC ? '#3EA6FF' : '#FFF'}}>Off</Text>
-                    </TouchableOpacity>
-                    {captions.map((track, idx) => (
-                      <TouchableOpacity key={idx} style={styles.menuItem} onPress={() => { setSelectedCC(track); setShowCCMenu(false); }}>
-                        <Text style={{color: selectedCC?.language === track.language ? '#3EA6FF' : '#FFF'}}>{track.label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
+     return (
+       <View style={styles.fullContainer} pointerEvents="box-none">
+          <View style={styles.videoWrapper}>
+              {streamUrl ? (
+                 <Video ref={videoRef} source={{ uri: streamUrl }} style={styles.video} shouldPlay={isPlaying} useNativeControls resizeMode="contain" />
+              ) : (
+                 <View style={styles.loadingBox}><Text style={{color: '#AAA'}}>Loading Video...</Text></View>
               )}
           </View>
-      );
+       </View>
+     );
   }
 
+  // Mini Player Mode (Home/Search Screen এর নিচে ভাসবে)
   return (
-    <TouchableOpacity style={styles.miniMode} activeOpacity={1} onPress={expandPlayer}>
-       <View style={styles.miniPlayerVideoWrapper}>
-          <Video ref={videoRef} source={{ uri: videoUrl }} style={styles.miniVideo} shouldPlay={isPlaying} isMuted={streamMode === 'separate'} resizeMode="cover" onPlaybackStatusUpdate={handlePlaybackStatusUpdate} />
-       </View>
-       <View style={styles.miniPlayerTextContainer}>
-          <Text style={styles.miniPlayerTitle} numberOfLines={1}>{videoData?.title}</Text>
-          <Text style={styles.miniPlayerSubTitle} numberOfLines={1}>{videoData?.channel}</Text>
-       </View>
-       <TouchableOpacity style={styles.miniPlayerBtn} onPress={togglePlayPause}>
-          <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
-       </TouchableOpacity>
-       <TouchableOpacity style={styles.miniPlayerBtn} onPress={handleClose}>
-          <Ionicons name="close" size={26} color="#FFF" />
-       </TouchableOpacity>
-    </TouchableOpacity>
+     <TouchableOpacity style={styles.miniContainer} activeOpacity={1} onPress={() => {
+        setPlayerState('full');
+        navigation.navigate('Player', { videoId: videoData.id, videoData: videoData });
+     }}>
+        <View style={styles.miniVideoWrapper}>
+           {streamUrl ? (
+              <Video ref={videoRef} source={{ uri: streamUrl }} style={styles.video} shouldPlay={isPlaying} resizeMode="cover" isMuted={false} />
+           ) : <View style={styles.loadingBox} />}
+        </View>
+        <View style={styles.miniTextWrapper}>
+           <Text style={styles.miniTitle} numberOfLines={1}>{videoData?.title}</Text>
+           <Text style={styles.miniChannel} numberOfLines={1}>{videoData?.channel}</Text>
+        </View>
+        <TouchableOpacity onPress={togglePlay} style={styles.miniBtn}>
+           <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={closePlayer} style={styles.miniBtn}>
+           <Ionicons name="close" size={26} color="#FFF" />
+        </TouchableOpacity>
+     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  fullMode: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, backgroundColor: '#000', zIndex: 9999 },
-  fullVideo: { width: '100%', height: '100%' },
-  ccBtn: { position: 'absolute', top: 10, right: 15, zIndex: 20, padding: 5, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 20 },
-  ccMenu: { position: 'absolute', top: 50, right: 10, width: 200, maxHeight: 250, backgroundColor: '#1E1E1E', borderRadius: 10, padding: 15, zIndex: 10000, elevation: 10, borderWidth: 1, borderColor: '#333' },
-  menuTitle: { color: '#888', fontSize: 12, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase' },
-  menuItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2A2A' },
-  miniMode: { position: 'absolute', bottom: 60, left: 0, width: '100%', height: 60, backgroundColor: '#212121', borderTopWidth: 1, borderTopColor: '#333', zIndex: 10000, flexDirection: 'row', alignItems: 'center', elevation: 10 },
-  miniPlayerVideoWrapper: { width: 110, height: 60, backgroundColor: '#000' },
-  miniVideo: { width: '100%', height: '100%' },
-  miniPlayerTextContainer: { flex: 1, paddingHorizontal: 10, justifyContent: 'center' },
-  miniPlayerTitle: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
-  miniPlayerSubTitle: { color: '#AAA', fontSize: 11 },
-  miniPlayerBtn: { padding: 12 }
+  fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
+  videoWrapper: { flex: 1, backgroundColor: '#000' },
+  video: { width: '100%', height: '100%' },
+  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
+  miniContainer: { position: 'absolute', bottom: 60, left: 0, width: '100%', height: 60, backgroundColor: '#212121', borderTopWidth: 1, borderTopColor: '#333', flexDirection: 'row', alignItems: 'center', zIndex: 9999, elevation: 10 },
+  miniVideoWrapper: { width: 110, height: 60, backgroundColor: '#000' },
+  miniTextWrapper: { flex: 1, paddingHorizontal: 10, justifyContent: 'center' },
+  miniTitle: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
+  miniChannel: { color: '#AAA', fontSize: 11 },
+  miniBtn: { padding: 12 }
 });
