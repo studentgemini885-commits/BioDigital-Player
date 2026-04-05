@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, SafeAreaView
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DeviceEventEmitter } from 'react-native'; 
 
 const { width } = Dimensions.get('window');
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -20,7 +21,7 @@ export default function ChannelScreen() {
   const [loading, setLoading] = useState(true);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLiveChannel, setIsLiveChannel] = useState(false); 
-  const [liveVideoData, setLiveVideoData] = useState(null); 
+  const [liveVideoData, setLiveVideoData] = useState(null); // নির্দিষ্ট লাইভ ভিডিওর ডেটা সংরক্ষণের জন্য
   const [thumbQuality, setThumbQuality] = useState('High');
   const [channelBanner, setChannelBanner] = useState('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop');
   const [subscriberCount, setSubscriberCount] = useState('N/A');
@@ -52,6 +53,7 @@ export default function ChannelScreen() {
       const publishedTime = vid.publishedTimeText?.simpleText || ''; 
       const title = vid.title?.runs?.[0]?.text || vid.title?.simpleText || 'No Title';
       const views = vid.shortViewCountText?.simpleText || vid.viewCountText?.simpleText || '';
+      // ভিডিওটি লাইভ কিনা তা চেক করে স্ট্যাটাস সেভ করা হচ্ছে
       const isLive = JSON.stringify(vid).includes('"BADGE_STYLE_TYPE_LIVE_NOW"');
 
       return {
@@ -156,6 +158,7 @@ export default function ChannelScreen() {
       categorizedData.Videos = categorizedData.Videos.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
       categorizedData.Shorts = categorizedData.Shorts.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
 
+      // নির্দিষ্ট লাইভ ভিডিওটি খুঁজে বের করা হচ্ছে
       const currentLiveVideo = categorizedData.Videos.find(v => v.isLive);
       if (currentLiveVideo) {
          setIsLiveChannel(true);
@@ -213,7 +216,7 @@ export default function ChannelScreen() {
   };
 
   const handleVideoPress = (item) => {
-    // গ্লোবাল ইভেন্ট মুছে দিয়ে সরাসরি ন্যাভিগেট করা হচ্ছে
+    DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
     navigation.navigate('Player', { videoId: item.id, videoData: item });
   };
 
@@ -268,11 +271,13 @@ export default function ChannelScreen() {
     <View>
       <Image source={{ uri: channelBanner }} style={styles.bannerImage} />
       <View style={styles.channelProfileSection}>
+        {/* লোগো এবং লাইভ ব্যাজের অংশ (ক্লিকেবল) */}
         <TouchableOpacity 
           style={styles.avatarWrapper} 
           activeOpacity={isLiveChannel ? 0.7 : 1} 
           onPress={() => {
             if (isLiveChannel && liveVideoData) {
+              DeviceEventEmitter.emit('playVideo', { videoId: liveVideoData.id, videoData: liveVideoData });
               navigation.navigate('Player', { videoId: liveVideoData.id, videoData: liveVideoData });
             }
           }}
@@ -337,6 +342,7 @@ export default function ChannelScreen() {
         ListHeaderComponent={ChannelHeader}
         ListEmptyComponent={renderEmptyComponent} 
         showsVerticalScrollIndicator={false} 
+        contentContainerStyle={{ paddingBottom: 80 }} 
       />
     </SafeAreaView>
   );
