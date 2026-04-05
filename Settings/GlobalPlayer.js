@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, PanResponder } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, PanResponder, ActivityIndicator } from 'react-native';
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // লোকাল মেমোরি রিড করার জন্য যুক্ত করা হলো
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16;
 const MINI_WIDTH = width * 0.45; 
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 
-// [গুরুত্বপূর্ণ]: 127.0.0.1 এর বদলে আপনার কম্পিউটারের আসল WiFi IPv4 Address দিন।
-// উদাহরণ: "http://192.168.1.5:10000"
-const MY_API_SERVER = "http://192.168.0.105:10000"; 
+// [গুরুত্বপূর্ণ]: Termux এবং অ্যাপ একই ফোনে থাকলে 127.0.0.1 কাজ করবে। 
+// যদি কাজ না করে এবং "Server Error" দেখায়, তবে এখানে আপনার ওয়াইফাইয়ের আসল আইপি দিবেন (যেমন: http://192.168.0.105:10000)
+const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
 global.appSettings = global.appSettings || {};
 
@@ -41,6 +41,7 @@ export default function GlobalPlayer() {
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
   const [isPlaying, setIsPlaying] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null); // নতুন: সার্ভার এরর ট্র্যাক করার জন্য
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
@@ -79,11 +80,11 @@ export default function GlobalPlayer() {
       setVideoData(data.videoData);
       setPlayerState('full');
       setStreamUrl(null);
+      setErrorMsg(null);
       setIsPlaying(true);
       pan.setValue({ x: 0, y: 0 });
 
       try {
-        // [FIX]: সরাসরি লোকাল মেমোরি (AsyncStorage) থেকে কোয়ালিটি রিড করা হচ্ছে
         let targetQuality = '720p';
         try {
             const savedAppSet = await AsyncStorage.getItem('appSettings');
@@ -91,21 +92,29 @@ export default function GlobalPlayer() {
                 const parsed = JSON.parse(savedAppSet);
                 if (parsed.normalVideo) targetQuality = parsed.normalVideo;
             } else {
-                const savedVidQuality = await AsyncStorage.getItem('videoQuality'); // যদি ভিন্ন নামে সেভ হয়ে থাকে
+                const savedVidQuality = await AsyncStorage.getItem('videoQuality'); 
                 if (savedVidQuality) targetQuality = savedVidQuality;
                 else if (global.appSettings?.normalVideo) targetQuality = global.appSettings.normalVideo;
             }
-        } catch(e) { console.warn("Quality read error", e); }
+        } catch(e) { console.warn(e); }
 
         const numericQuality = getNumericQuality(targetQuality);
-        
         const targetUrl = `https://www.youtube.com/watch?v=${data.videoId}`;
         const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&quality=${numericQuality}&t=${Date.now()}`;
         
         const res = await fetch(apiUrl);
         const json = await res.json();
-        if (json.success && json.url) setStreamUrl(json.url);
-      } catch(e) { console.error(e); }
+        
+        if (json.success && json.url) {
+            setStreamUrl(json.url);
+            setErrorMsg(null);
+        } else {
+            setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
+        }
+      } catch(e) { 
+        console.error(e); 
+        setErrorMsg("সার্ভার কানেকশন এরর!"); // সার্ভার বন্ধ থাকলে বা আইপি ভুল থাকলে এটি দেখাবে
+      }
     });
 
     const minimizeSubscription = DeviceEventEmitter.addListener('minimizeVideo', () => {
@@ -126,7 +135,7 @@ export default function GlobalPlayer() {
 
   const closePlayer = async () => {
      if (videoRef.current) await videoRef.current.pauseAsync();
-     setPlayerState('hidden'); setVideoData(null); setStreamUrl(null); pan.setValue({ x: 0, y: 0 });
+     setPlayerState('hidden'); setVideoData(null); setStreamUrl(null); setErrorMsg(null); pan.setValue({ x: 0, y: 0 });
   };
 
   const expandToFull = () => {
@@ -140,10 +149,18 @@ export default function GlobalPlayer() {
      return (
        <View style={styles.fullContainer} pointerEvents="box-none">
           <View style={styles.fullVideoWrapper}>
-             {streamUrl ? (
+             {errorMsg ? (
+                <View style={styles.loadingBox}>
+                    <Ionicons name="warning-outline" size={40} color="#FF4444" />
+                    <Text style={{color:'#FF4444', marginTop: 10, fontWeight: 'bold'}}>{errorMsg}</Text>
+                </View>
+             ) : streamUrl ? (
                 <Video ref={videoRef} source={{ uri: streamUrl }} style={styles.video} shouldPlay={isPlaying} useNativeControls={true} resizeMode="contain" />
              ) : (
-                <View style={styles.loadingBox}><Text style={{color:'#AAA'}}>Loading Quality...</Text></View>
+                <View style={styles.loadingBox}>
+                    <ActivityIndicator size="large" color="#FF0000" />
+                    <Text style={{color:'#AAA', marginTop: 10}}>কোয়ালিটি রিড করা হচ্ছে...</Text>
+                </View>
              )}
           </View>
        </View>
@@ -154,9 +171,17 @@ export default function GlobalPlayer() {
      <Animated.View style={[styles.miniContainer, { transform: [{ translateX: pan.x }, { translateY: pan.y }] }]} {...panResponder.panHandlers}>
         <TouchableOpacity activeOpacity={0.9} style={styles.miniTouchable} onPress={expandToFull}>
            <View style={styles.miniVideoWrapper}>
-               {streamUrl ? (
+               {errorMsg ? (
+                  <View style={styles.loadingBox}>
+                     <Ionicons name="warning" size={24} color="#FF4444" />
+                  </View>
+               ) : streamUrl ? (
                   <Video ref={videoRef} source={{ uri: streamUrl }} style={styles.video} shouldPlay={isPlaying} useNativeControls={false} resizeMode="cover" />
-               ) : ( <View style={styles.loadingBox} /> )}
+               ) : ( 
+                  <View style={styles.loadingBox}>
+                     <ActivityIndicator size="small" color="#FF0000" />
+                  </View> 
+               )}
                <View style={styles.overlay}>
                   <TouchableOpacity style={styles.miniPlayBtn} onPress={togglePlay}>
                      <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
