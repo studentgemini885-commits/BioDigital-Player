@@ -19,9 +19,7 @@ export default function GlobalPlayer() {
   const [isPlaying, setIsPlaying] = useState(true);
 
   useEffect(() => {
-    // ভিডিও প্লে করার কমান্ড রিসিভ করা
     const playSubscription = DeviceEventEmitter.addListener('playVideo', async (data) => {
-      // যদি একই ভিডিওতে পুনরায় চাপ দেওয়া হয়, তবে নতুন করে API কল না করে শুধু বড় করে দেবে
       if (videoData?.id === data.videoId) {
           setPlayerState('full');
           return;
@@ -41,7 +39,6 @@ export default function GlobalPlayer() {
       } catch(e) { console.error(e); }
     });
 
-    // ভিডিও মিনিমাইজ করার কমান্ড রিসিভ করা (PlayerScreen থেকে বের হলে)
     const minimizeSubscription = DeviceEventEmitter.addListener('minimizeVideo', () => {
       setPlayerState('mini');
     });
@@ -73,14 +70,12 @@ export default function GlobalPlayer() {
      setStreamUrl(null);
   };
 
-  // 'Single Source of Truth': স্টেট নির্ণয় করা হচ্ছে
   const isFull = playerState === 'full';
 
   return (
      <View style={isFull ? styles.fullContainer : styles.miniContainer} pointerEvents="box-none">
         <TouchableOpacity
-          activeOpacity={isFull ? 1 : 0.8}
-          // ফুল স্ক্রিনে থাকা অবস্থায় TouchableOpacity নিস্ক্রিয় থাকবে, যেন ভিডিওর নিজস্ব কন্ট্রোল কাজ করে
+          activeOpacity={isFull ? 1 : 0.9}
           onPress={() => {
              if (!isFull && videoData) {
                 setPlayerState('full');
@@ -89,7 +84,7 @@ export default function GlobalPlayer() {
           }}
           style={isFull ? styles.fullTouchable : styles.miniTouchable}
         >
-           {/* মূল ভিডিও ইঞ্জিন: এটি একটিমাত্র ট্যাগ হওয়ায় আনমাউন্ট হবে না */}
+           {/* ইউটিউবের অফিশিয়াল অ্যাসপেক্ট রেশিও এবং ডাইমেনশন অনুযায়ী ভিডিও র‍্যাপার */}
            <View style={isFull ? styles.fullVideoWrapper : styles.miniVideoWrapper}>
                {streamUrl ? (
                   <Video 
@@ -97,53 +92,62 @@ export default function GlobalPlayer() {
                      source={{ uri: streamUrl }} 
                      style={styles.video} 
                      shouldPlay={isPlaying} 
-                     useNativeControls={isFull} // শুধুমাত্র ফুল স্ক্রিনে ইউটিউব কন্ট্রোল দেখাবে
+                     useNativeControls={isFull} 
                      resizeMode={isFull ? "contain" : "cover"} 
                   />
                ) : (
-                  <View style={styles.loadingBox}><Text style={{color: '#AAA'}}>Loading Video...</Text></View>
+                  <View style={styles.loadingBox} />
                )}
            </View>
 
-           {/* মিনি প্লেয়ারের টেক্সট ও বাটন (শুধুমাত্র মিনি অবস্থায় রেন্ডার হবে) */}
+           {/* মিনি প্লেয়ারের টেক্সট ও বাটন (ইউটিউবের এক্স্যাক্ট এলাইনমেন্ট) */}
            {!isFull && (
-              <>
+              <View style={styles.miniControlsRow}>
                 <View style={styles.miniTextWrapper}>
                    <Text style={styles.miniTitle} numberOfLines={1}>{videoData?.title}</Text>
                    <Text style={styles.miniChannel} numberOfLines={1}>{videoData?.channel}</Text>
                 </View>
-                <TouchableOpacity onPress={togglePlay} style={styles.miniBtn}>
-                   <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={closePlayer} style={styles.miniBtn}>
-                   <Ionicons name="close" size={26} color="#FFF" />
-                </TouchableOpacity>
-              </>
+                <View style={styles.miniActionButtons}>
+                   <TouchableOpacity onPress={togglePlay} style={styles.miniBtn}>
+                      <Ionicons name={isPlaying ? "pause" : "play"} size={24} color="#FFF" />
+                   </TouchableOpacity>
+                   <TouchableOpacity onPress={closePlayer} style={styles.miniBtn}>
+                      <Ionicons name="close" size={26} color="#FFF" />
+                   </TouchableOpacity>
+                </View>
+              </View>
            )}
         </TouchableOpacity>
+        
+        {/* ইউটিউবের মতো নিচে একটি চিকন রেড প্রগ্রেস বার (Visual representation) */}
+        {!isFull && <View style={styles.miniProgressBar} />}
      </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // ফুল এবং মিনি মোডের মূল কন্টেইনার স্টাইল
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  miniContainer: { position: 'absolute', bottom: 60, left: 0, width: '100%', height: 60, backgroundColor: '#212121', borderTopWidth: 1, borderTopColor: '#333', zIndex: 9999, elevation: 10 },
+  // মিনি প্লেয়ারের ইউটিউব স্ট্যান্ডার্ড ডাইমেনশন
+  miniContainer: { position: 'absolute', bottom: 60, left: 0, width: '100%', height: 56, backgroundColor: '#212121', zIndex: 9999, elevation: 10 },
   
-  // টাচ এরিয়া স্টাইল
   fullTouchable: { flex: 1, width: '100%', height: '100%' },
   miniTouchable: { flex: 1, flexDirection: 'row', alignItems: 'center' },
 
-  // ভিডিও র‍্যাপার: এটিই মূলত আকৃতি পরিবর্তন করে
   fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%' },
-  miniVideoWrapper: { width: 110, height: 60, backgroundColor: '#000' },
+  // উচ্চতা 56 হলে 16:9 অনুপাতে প্রস্থ হবে প্রায় 100
+  miniVideoWrapper: { width: 100, height: 56, backgroundColor: '#000' },
 
   video: { width: '100%', height: '100%' },
-  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
+  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
   
-  // মিনি প্লেয়ার এলিমেন্টস
-  miniTextWrapper: { flex: 1, paddingHorizontal: 10, justifyContent: 'center' },
-  miniTitle: { color: '#FFF', fontSize: 13, fontWeight: 'bold' },
-  miniChannel: { color: '#AAA', fontSize: 11 },
-  miniBtn: { padding: 12 }
+  miniControlsRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  miniTextWrapper: { flex: 1, paddingHorizontal: 12, justifyContent: 'center' },
+  miniTitle: { color: '#FFF', fontSize: 13, fontWeight: '500', marginBottom: 2 },
+  miniChannel: { color: '#AAA', fontSize: 12 },
+  
+  miniActionButtons: { flexDirection: 'row', alignItems: 'center', paddingRight: 8 },
+  miniBtn: { paddingHorizontal: 10, paddingVertical: 8 },
+  
+  // ইউটিউবের সিগনেচার বটম রেড লাইন
+  miniProgressBar: { position: 'absolute', bottom: 0, left: 0, width: '100%', height: 1.5, backgroundColor: 'rgba(255, 255, 255, 0.2)' }
 });
