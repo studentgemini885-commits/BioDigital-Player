@@ -8,7 +8,7 @@ import ChannelScreen from './Screens/ChannelScreen';
 import PlaylistScreen from './Screens/PlaylistPage';
 import ShortsScreen from './Screens/ShortsScreen';
 import HistoryPage from './Settings/HistoryPage'; 
-import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
+import SubscriptionsScreen from './Screens/SubscriptionsScreen'; 
 import SearchSettingScreen from './Settings/searchsetting'; 
 
 // নতুন গ্লোবাল প্লেয়ার ইমপোর্ট করা হলো
