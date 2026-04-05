@@ -2,15 +2,17 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
-// আপনার তৈরি করা সব স্ক্রিন ইমপোর্ট করা হলো
-import HomeScreen from './Screens/HomeScreen';
-import PlayerScreen from './Screens/PlayerScreen';
-import ChannelScreen from './Screens/ChannelScreen';
-import PlaylistScreen from './Screens/PlaylistPage';
-import ShortsScreen from './Screens/ShortsScreen';
+import HomeScreen from './screens/HomeScreen';
+import PlayerScreen from './screens/PlayerScreen';
+import ChannelScreen from './screens/ChannelScreen';
+import PlaylistScreen from './screens/PlaylistPage';
+import ShortsScreen from './screens/ShortsScreen';
 import HistoryPage from './Settings/HistoryPage'; 
-import SubscriptionsScreen from './Screens/SubscriptionsScreen'; 
+import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
 import SearchSettingScreen from './Settings/searchsetting'; 
+
+// নতুন গ্লোবাল প্লেয়ার ইমপোর্ট করা হলো
+import GlobalPlayer from './GlobalPlayer'; 
 
 const Stack = createStackNavigator();
 
@@ -25,10 +27,12 @@ export default function App() {
         <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
         <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-
-        {/* Search স্ক্রিনটি সঠিকভাবে যুক্ত করা হয়েছে */}
         <Stack.Screen name="Search" component={SearchSettingScreen} options={{ headerShown: false }} />
       </Stack.Navigator>
+
+      {/* এই প্লেয়ারটি সব স্ক্রিনের উপরে ভাসবে এবং কখনো আনমাউন্ট হবে না */}
+      <GlobalPlayer />
+
     </NavigationContainer>
   );
 }
