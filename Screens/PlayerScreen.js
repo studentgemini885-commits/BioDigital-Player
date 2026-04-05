@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-// NativeModules ইমপোর্ট করা হয়েছে
-import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, NativeModules } from 'react-native';
+import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, BackHandler, Platform } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // AsyncStorage যুক্ত করা হলো
 
 const { width } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
+const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
-// কাস্টম কোটলিন মডিউলটিকে জাভাস্ক্রিপ্টে কল করার জন্য যুক্ত করা হলো
-const { YtdlpModule } = NativeModules;
+global.appSettings = global.appSettings || {};
+global.playerBridge = global.playerBridge || { videoId: null, videoData: null, currentTime: 0 };
 
+// কোয়ালিটি স্ট্রিং থেকে সঠিক রেজোলিউশন বের করার ফাংশন
 const getNumericQuality = (q) => {
     if (!q) return '720';
     if (q.includes('Auto') || q.includes('Normal')) return '720';
@@ -37,7 +38,7 @@ export default function PlayerScreen({ route, navigation }) {
   const [loadingUrl, setLoadingUrl] = useState(true);
   const [errorMessage, setErrorMessage] = useState(null);
   
-  const [currentQuality, setCurrentQuality] = useState('720p');
+  const [currentQuality, setCurrentQuality] = useState(global.appSettings?.normalVideo || '720p');
   const [actualPlayingQuality, setActualPlayingQuality] = useState('Loading...'); 
 
   const [captions, setCaptions] = useState([]); 
@@ -46,10 +47,10 @@ export default function PlayerScreen({ route, navigation }) {
 
   const [relatedVideos, setRelatedVideos] = useState([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  
+  const [isSubscribed, setIsSubscribed] = useState(false); // সাবস্ক্রিপশন স্টেট
+
   const videoPlayerRef = useRef(null);
   const audioPlayerRef = useRef(new Audio.Sound()); 
-  const appliedQualityRef = useRef('720p'); 
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -63,57 +64,103 @@ export default function PlayerScreen({ route, navigation }) {
   }, []);
 
   useEffect(() => {
-    const initializePlayer = async () => {
-      setVideoUrl(null);
-      setAudioUrl(null);
-      setLoadingUrl(true);
-      setErrorMessage(null);
-      setSelectedCC(null);
-      setCaptions([]);
-      if (audioPlayerRef.current) await audioPlayerRef.current.unloadAsync();
-      
-      const savedQuality = await AsyncStorage.getItem('@normalVideoQuality') || '720p';
-      appliedQualityRef.current = savedQuality;
-      setCurrentQuality(savedQuality);
-      
-      fetchVideoFromNativeModule(savedQuality);
-      fetchRelatedVideos(false);
-    };
-    initializePlayer();
+    setVideoUrl(null);
+    setAudioUrl(null);
+    setLoadingUrl(true);
+    setErrorMessage(null);
+    setSelectedCC(null);
+    setCaptions([]);
+    checkSubscriptionStatus(); // সাবস্ক্রিপশন চেক
+    if (audioPlayerRef.current) audioPlayerRef.current.unloadAsync();
+    
+    const initialQuality = global.appSettings?.normalVideo || '720p';
+    setCurrentQuality(initialQuality);
+    fetchVideoFromLocalServer(initialQuality);
+    fetchRelatedVideos(false);
   }, [videoId]);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', async () => {
-      const savedQuality = await AsyncStorage.getItem('@normalVideoQuality') || '720p';
+  // সাবস্ক্রিপশন স্ট্যাটাস চেক করার ফাংশন
+  const checkSubscriptionStatus = async () => {
+    try {
+      const subs = await AsyncStorage.getItem('subscribedChannels');
+      const parsedSubs = subs ? JSON.parse(subs) : [];
+      const subbed = parsedSubs.some(s => s.name === videoData.channel);
+      setIsSubscribed(subbed);
+    } catch (e) {}
+  };
+
+  // সাবস্ক্রাইব বাটন হ্যান্ডলার
+  const toggleSubscription = async () => {
+    try {
+      let subs = await AsyncStorage.getItem('subscribedChannels');
+      subs = subs ? JSON.parse(subs) : [];
+      const exists = subs.some(s => s.name === videoData.channel);
       
-      if (appliedQualityRef.current !== savedQuality) {
-          appliedQualityRef.current = savedQuality; 
-          setCurrentQuality(savedQuality); 
-          
-          setVideoUrl(null); 
-          setAudioUrl(null);
-          if (audioPlayerRef.current) await audioPlayerRef.current.unloadAsync();
-          setLoadingUrl(true);
-          setActualPlayingQuality('Switching...');
-          
-          fetchVideoFromNativeModule(savedQuality);
+      if (exists) {
+        subs = subs.filter(s => s.name !== videoData.channel);
+      } else {
+        subs.push({ 
+          id: Date.now().toString(), 
+          name: videoData.channel, 
+          avatar: videoData.avatar 
+        });
+      }
+      
+      await AsyncStorage.setItem('subscribedChannels', JSON.stringify(subs));
+      setIsSubscribed(!exists);
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      const savedQuality = global.appSettings?.normalVideo || '720p';
+      if (savedQuality !== currentQuality) {
+        setCurrentQuality(savedQuality);
+        setVideoUrl(null); 
+        setAudioUrl(null);
+        if (audioPlayerRef.current) audioPlayerRef.current.unloadAsync();
+        setLoadingUrl(true);
+        setActualPlayingQuality('Switching...');
+        fetchVideoFromLocalServer(savedQuality);
       }
     });
     return unsubscribe;
-  }, [navigation, videoId]);
+  }, [navigation, currentQuality, videoId]);
 
-  // HTTP Request (fetch) মুছে ফেলে সরাসরি Native Bridge কল করার লজিক
-  const fetchVideoFromNativeModule = async (qualityStr) => {
+  useEffect(() => {
+    const backAction = async () => {
+      if (videoUrl && videoPlayerRef.current) {
+        try {
+          const status = await videoPlayerRef.current.getStatusAsync();
+          global.playerBridge = {
+            videoId: videoId,
+            videoData: videoData,
+            currentTime: status.positionMillis || 0
+          };
+          await videoPlayerRef.current.pauseAsync();
+        } catch (e) {
+          console.log("Error getting status:", e);
+        }
+      }
+      navigation.navigate('Home');
+      return true; 
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove(); 
+  }, [videoUrl, videoId, videoData]);
+
+  const fetchVideoFromLocalServer = async (qualityStr) => {
     try {
       const numericQuality = getNumericQuality(qualityStr);
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&quality=${numericQuality}&t=${Date.now()}`;
       
-      // 코টলিন ফাইলে থাকা extractVideoInfo ফাংশনকে কল করা হচ্ছে
-      const resultString = await YtdlpModule.extractVideoInfo(targetUrl, numericQuality.toString());
-      const data = JSON.parse(resultString);
+      const response = await fetch(apiUrl);
+      const data = await response.json();
 
       if (data.success && data.url) {
-        setStreamMode(data.streamType || 'combined');
+        setStreamMode(data.streamType);
         setVideoUrl(data.url);
         
         if(qualityStr.includes('75p') || qualityStr.includes('Anti')) {
@@ -129,10 +176,10 @@ export default function PlayerScreen({ route, navigation }) {
             await audioPlayerRef.current.loadAsync({ uri: data.audioUrl });
         }
       } else {
-        setErrorMessage(data.error || "লিংক বের করতে সমস্যা হয়েছে।");
+        setErrorMessage(data.error || "লিংক বের করতে সমস্যা হয়েছে।");
       }
     } catch (error) {
-      setErrorMessage(`অ্যান্ড্রয়েড নেটিভ এরর: ${error.message || "Unknown Error"}`);
+      setErrorMessage("টারমাক্স সার্ভার কানেক্ট করা যাচ্ছে না।");
     } finally {
       setLoadingUrl(false);
     }
@@ -181,7 +228,8 @@ export default function PlayerScreen({ route, navigation }) {
               title: vid.title?.runs?.[0]?.text, 
               channel: vid.ownerText?.runs?.[0]?.text || 'Channel', 
               views: vid.viewCountText?.simpleText, 
-              thumbnail: `https://i.ytimg.com/vi/${vid.videoId}/hqdefault.jpg`
+              thumbnail: `https://i.ytimg.com/vi/${vid.videoId}/hqdefault.jpg`,
+              avatar: vid.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url
             });
           } else Object.values(node).forEach(extractNodes);
         }
@@ -203,28 +251,66 @@ export default function PlayerScreen({ route, navigation }) {
     setShowCCMenu(false);
   };
 
+  const AppHeader = () => (
+    <View style={styles.appHeader}>
+      <TouchableOpacity onPress={() => navigation.navigate('Home')} style={styles.logoContainer}>
+         <Ionicons name="logo-youtube" size={28} color="#FF0000" />
+         <Text style={styles.logoText}>MyTube</Text>
+      </TouchableOpacity>
+      <View style={{flex: 1}} />
+      <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.headerIconBtn}>
+        <Ionicons name="search" size={24} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderHeader = () => (
     <View style={styles.detailsContainer}>
       <Text style={styles.mainTitle}>{videoData?.title || "Video Title"}</Text>
       <Text style={styles.mainViews}>{videoData?.views || "N/A views"} • {actualPlayingQuality}</Text>
+      
       <View style={styles.actionRow}>
         <TouchableOpacity style={styles.actionBtn}><Ionicons name="thumbs-up-outline" size={20} color="#FFF" /><Text style={styles.actionText}>Like</Text></TouchableOpacity>
         <TouchableOpacity style={styles.actionBtn}><Ionicons name="download-outline" size={20} color="#FFF" /><Text style={styles.actionText}>Download</Text></TouchableOpacity>
         <TouchableOpacity style={styles.actionBtn}><Ionicons name="share-social-outline" size={20} color="#FFF" /><Text style={styles.actionText}>Share</Text></TouchableOpacity>
       </View>
+      
+      <View style={styles.divider} />
+      
+      {/* চ্যানেল ইনফো সেকশন - এখানে চাপ দিলে চ্যানেল স্ক্রিনে যাবে */}
+      <View style={styles.channelRow}>
+        <TouchableOpacity 
+          style={styles.channelLeft} 
+          onPress={() => navigation.navigate('Channel', { channelName: videoData.channel, channelAvatar: videoData.avatar })}
+        >
+          <Image source={{ uri: videoData.avatar }} style={styles.channelAvatar} />
+          <View>
+            <Text style={styles.channelName} numberOfLines={1}>{videoData.channel}</Text>
+            <Text style={styles.subCount}>1.2M subscribers</Text>
+          </View>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.subscribeBtn, isSubscribed && styles.subscribedBtn]} 
+          onPress={toggleSubscription}
+        >
+          <Text style={[styles.subscribeText, isSubscribed && styles.subscribedText]}>
+            {isSubscribed ? 'Subscribed' : 'Subscribe'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      
       <View style={styles.divider} />
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar backgroundColor="#000" barStyle="light-content" />
+      <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={false} />
       
-      <View style={styles.playerWrapper}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-down" size={30} color="#FFF" />
-        </TouchableOpacity>
+      <AppHeader />
 
+      <View style={styles.playerWrapper}>
         {loadingUrl ? (
           <View style={{alignItems: 'center'}}>
              <ActivityIndicator size="large" color="#FF0000" />
@@ -299,10 +385,13 @@ export default function PlayerScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0F0F0F' },
+    appHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, height: 55, backgroundColor: '#0F0F0F', borderBottomWidth: 1, borderBottomColor: '#222' },
+    logoContainer: { flexDirection: 'row', alignItems: 'center' },
+    logoText: { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginLeft: 6, letterSpacing: -0.5 },
+    headerIconBtn: { padding: 10 },
     playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', position: 'relative' },
     video: { width: '100%', height: '100%' },
-    backBtn: { position: 'absolute', top: 10, left: 10, zIndex: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, padding: 4 },
-    ccBtn: { position: 'absolute', top: 10, right: 15, zIndex: 20, padding: 5 },
+    ccBtn: { position: 'absolute', top: 10, right: 15, zIndex: 20, padding: 5, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 20 },
     ccMenu: { position: 'absolute', top: 50, right: 10, width: 200, maxHeight: 250, backgroundColor: '#1E1E1E', borderRadius: 10, padding: 15, zIndex: 100, elevation: 10, borderWidth: 1, borderColor: '#333' },
     menuTitle: { color: '#888', fontSize: 12, fontWeight: 'bold', marginBottom: 10, textTransform: 'uppercase' },
     menuItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2A2A2A' },
@@ -313,6 +402,18 @@ const styles = StyleSheet.create({
     actionBtn: { alignItems: 'center', backgroundColor: '#222', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 20 },
     actionText: { color: '#FFF', fontSize: 12, marginTop: 4 },
     divider: { height: 1, backgroundColor: '#222', marginTop: 15 },
+    
+    // চ্যানেল ইনফো স্টাইল
+    channelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
+    channelLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    channelAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: '#333' },
+    channelName: { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
+    subCount: { color: '#AAA', fontSize: 12 },
+    subscribeBtn: { backgroundColor: '#FFF', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 },
+    subscribeText: { color: '#000', fontSize: 13, fontWeight: 'bold' },
+    subscribedBtn: { backgroundColor: '#222' },
+    subscribedText: { color: '#FFF' },
+
     recCard: { flexDirection: 'row', padding: 10 },
     recThumb: { width: 140, height: 80, borderRadius: 8, backgroundColor: '#222' },
     recInfo: { flex: 1, marginLeft: 12, justifyContent: 'center' },
