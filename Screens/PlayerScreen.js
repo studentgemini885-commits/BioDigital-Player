@@ -1,97 +1,34 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, BackHandler } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { usePlayerStore } from './PlayerStore'; // পাথ মিলিয়ে নিবেন
+import { DeviceEventEmitter } from 'react-native';
 
 const { width } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
-const MY_API_SERVER = "http://127.0.0.1:10000"; 
-
-global.appSettings = global.appSettings || {};
-
-const getNumericQuality = (q) => {
-    if (!q) return '720';
-    if (q.includes('Auto') || q.includes('Normal')) return '720';
-    if (q.includes('75p') || q.includes('Anti') || q.includes('Low')) return '144'; 
-    if (q.includes('144p') || q.includes('240p') || q.includes('360p') || q.includes('480p') || q.includes('720p') || q.includes('1080p')) return q.replace('p', '');
-    if (q.includes('1440p') || q.includes('2K')) return '1440';
-    if (q.includes('2160p') || q.includes('4K') || q.toLowerCase().includes('4k')) return '2160';
-    if (q.includes('4320p') || q.includes('8K') || q.toLowerCase().includes('8k')) return '4320';
-    return '720'; 
-};
 
 export default function PlayerScreen({ route, navigation }) {
   const { videoId, videoData = {} } = route?.params || {};
-  const { videoId: globalVideoId, setVideoConfig, setPlayerState, actualQuality } = usePlayerStore();
-  
-  const [loadingUrl, setLoadingUrl] = useState(true);
-  const [errorMessage, setErrorMessage] = useState(null);
   
   const [relatedVideos, setRelatedVideos] = useState([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({ headerShown: false });
-  }, [navigation]);
-
   useEffect(() => {
-    const initProcess = async () => {
-      setErrorMessage(null);
-      checkSubscriptionStatus();
-      
-      // যদি এই ভিডিওটি আগে থেকেই গ্লোবাল প্লেয়ারে থাকে, তাহলে নতুন করে কল করবে না
-      if (globalVideoId === videoId) {
-          setPlayerState('full');
-          setLoadingUrl(false);
-      } else {
-          setLoadingUrl(true);
-          fetchVideoFromLocalServer(global.appSettings?.normalVideo || '720p');
-      }
-      fetchRelatedVideos(false);
-    };
-    initProcess();
+    checkSubscriptionStatus();
+    fetchRelatedVideos(false);
   }, [videoId]);
 
+  // ফিজিক্যাল ব্যাক বাটন প্রেস করলে ভিডিও যেন মিনিমাইজ হয়
   useEffect(() => {
     const backAction = () => {
-      handleGoBack('Home');
+      DeviceEventEmitter.emit('minimizeVideo');
+      navigation.goBack();
       return true; 
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove(); 
-  }, [videoId]);
-
-  const handleGoBack = (targetScreen = 'Home', params = {}) => {
-    if (usePlayerStore.getState().videoUrl) {
-        setPlayerState('mini');
-    }
-    navigation.navigate(targetScreen, params);
-  };
-
-  const fetchVideoFromLocalServer = async (qualityStr) => {
-    try {
-      const numericQuality = getNumericQuality(qualityStr);
-      const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&quality=${numericQuality}&t=${Date.now()}`;
-      
-      const response = await fetch(apiUrl);
-      const data = await response.json();
-
-      if (data.success && data.url) {
-        let actualQ = qualityStr.includes('75p') ? 'Data Saver Mode (Lowest)' : (data.actualQuality || `${numericQuality}p`);
-        // গ্লোবাল প্লেয়ারে ডেটা ট্রান্সফার
-        setVideoConfig(videoId, videoData, data.url, data.audioUrl, data.streamType, data.captions || [], actualQ);
-      } else {
-        setErrorMessage(data.error || "লিংক বের করতে সমস্যা হয়েছে।");
-      }
-    } catch (error) {
-      setErrorMessage("টারমাক্স সার্ভার কানেক্ট করা যাচ্ছে না।");
-    } finally {
-      setLoadingUrl(false);
-    }
-  };
+  }, []);
 
   const checkSubscriptionStatus = async () => {
     try {
@@ -137,16 +74,27 @@ export default function PlayerScreen({ route, navigation }) {
         }
       };
       extractNodes(JSON.parse(match[1]));
-      
       if (isLoadMore) setRelatedVideos(prev => [...prev, ...extractedVids.filter(v => !prev.find(p => p.id === v.id)).slice(0, 10)]);
       else setRelatedVideos(extractedVids.slice(0, 15));
     } catch (e) {} finally { setIsLoadingMore(false); }
   };
 
+  const AppHeader = () => (
+    <View style={styles.appHeader}>
+      <TouchableOpacity onPress={() => { DeviceEventEmitter.emit('minimizeVideo'); navigation.goBack(); }} style={styles.logoContainer}>
+         <Ionicons name="arrow-back" size={26} color="#FFF" />
+      </TouchableOpacity>
+      <View style={{flex: 1}} />
+      <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.headerIconBtn}>
+        <Ionicons name="search" size={24} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderHeader = () => (
     <View style={styles.detailsContainer}>
-      <Text style={styles.mainTitle}>{videoData?.title || "Video Title"}</Text>
-      <Text style={styles.mainViews}>{videoData?.views || "N/A views"} • {actualQuality}</Text>
+      <Text style={styles.mainTitle}>{videoData?.title}</Text>
+      <Text style={styles.mainViews}>{videoData?.views}</Text>
       
       <View style={styles.actionRow}>
         <TouchableOpacity style={styles.actionBtn}><Ionicons name="thumbs-up-outline" size={20} color="#FFF" /><Text style={styles.actionText}>Like</Text></TouchableOpacity>
@@ -155,11 +103,11 @@ export default function PlayerScreen({ route, navigation }) {
       </View>
       <View style={styles.divider} />
       <View style={styles.channelRow}>
-        <TouchableOpacity style={styles.channelLeft} onPress={() => handleGoBack('Channel', { channelName: videoData.channel, channelAvatar: videoData.avatar })}>
+        <TouchableOpacity style={styles.channelLeft} onPress={() => navigation.navigate('Channel', { channelName: videoData.channel, channelAvatar: videoData.avatar })}>
           <Image source={{ uri: videoData.avatar }} style={styles.channelAvatar} />
           <View>
             <Text style={styles.channelName} numberOfLines={1}>{videoData.channel}</Text>
-            <Text style={styles.subCount}>1.2M subscribers</Text>
+            <Text style={styles.subCount}>Subscriber Info</Text>
           </View>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.subscribeBtn, isSubscribed && styles.subscribedBtn]} onPress={toggleSubscription}>
@@ -174,33 +122,20 @@ export default function PlayerScreen({ route, navigation }) {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" translucent={false} />
       
-      <View style={styles.appHeader}>
-        <TouchableOpacity onPress={() => handleGoBack('Home')} style={styles.logoContainer}>
-           <Ionicons name="logo-youtube" size={28} color="#FF0000" /><Text style={styles.logoText}>MyTube</Text>
-        </TouchableOpacity>
-        <View style={{flex: 1}} />
-        <TouchableOpacity onPress={() => handleGoBack('Search')} style={styles.headerIconBtn}><Ionicons name="search" size={24} color="#FFF" /></TouchableOpacity>
-      </View>
+      <AppHeader />
 
-      {/* প্লেস হোল্ডার: এর উপরে গ্লোবাল ভিডিও বসবে */}
-      <View style={styles.playerWrapper}>
-        {loadingUrl ? (
-          <View style={{alignItems: 'center'}}>
-             <ActivityIndicator size="large" color="#FF0000" />
-             <Text style={{color: '#AAA', marginTop: 10, fontSize: 12}}>Loading Video...</Text>
-          </View>
-        ) : errorMessage ? (
-          <View style={{alignItems: 'center'}}>
-            <Ionicons name="alert-circle" size={40} color="#FF4444" />
-            <Text style={{color: '#FF4444', textAlign: 'center', marginTop: 10}}>{errorMessage}</Text>
-          </View>
-        ) : null}
-      </View>
+      {/* গ্লোবাল প্লেয়ারটি ঠিক এই কালো ফাঁকা জায়গাটির উপরে এসে বসবে, তাই এখানে কোনো ভিডিও ট্যাগ নেই */}
+      <View style={styles.playerWrapper}></View>
 
       <FlatList 
-        ListHeaderComponent={renderHeader} data={relatedVideos} keyExtractor={(item, index) => item.id + index.toString()} 
+        ListHeaderComponent={renderHeader}
+        data={relatedVideos} 
+        keyExtractor={(item, index) => item.id + index.toString()} 
         renderItem={({item}) => (
-          <TouchableOpacity style={styles.recCard} onPress={() => navigation.push('Player', { videoId: item.id, videoData: item })}>
+          <TouchableOpacity style={styles.recCard} onPress={() => {
+              DeviceEventEmitter.emit('playVideo', { videoId: item.id, videoData: item });
+              navigation.push('Player', { videoId: item.id, videoData: item });
+          }}>
             <Image source={{ uri: item.thumbnail }} style={styles.recThumb} />
             <View style={styles.recInfo}>
               <Text style={styles.recTitle} numberOfLines={2}>{item.title}</Text>
@@ -208,8 +143,8 @@ export default function PlayerScreen({ route, navigation }) {
             </View>
           </TouchableOpacity>
         )}
-        onEndReached={() => fetchRelatedVideos(true)} onEndReachedThreshold={0.5}
-        ListFooterComponent={isLoadingMore ? <ActivityIndicator size="large" color="#FF0000" style={{margin: 20}} /> : null}
+        onEndReached={() => fetchRelatedVideos(true)}
+        onEndReachedThreshold={0.5}
         showsVerticalScrollIndicator={false}
       />
     </SafeAreaView>
@@ -220,9 +155,8 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0F0F0F' },
     appHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, height: 55, backgroundColor: '#0F0F0F', borderBottomWidth: 1, borderBottomColor: '#222' },
     logoContainer: { flexDirection: 'row', alignItems: 'center' },
-    logoText: { color: '#FFF', fontSize: 19, fontWeight: 'bold', marginLeft: 6, letterSpacing: -0.5 },
     headerIconBtn: { padding: 10 },
-    playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
+    playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: 'transparent' },
     detailsContainer: { padding: 15 },
     mainTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', lineHeight: 24 },
     mainViews: { color: '#AAA', fontSize: 13, marginTop: 5, marginBottom: 15 },
