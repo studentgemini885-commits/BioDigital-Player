@@ -13,6 +13,9 @@ import SubscriptionsScreen from './screens/SubscriptionsScreen';
 // নতুন যুক্ত করা Search স্ক্রিনটি ইমপোর্ট করা হলো
 import SearchSettingScreen from './Settings/searchsetting'; 
 
+// গ্লোবাল ভিডিও প্লেয়ার (Zero-Loading System) ইমপোর্ট করা হলো
+import GlobalVideoPlayer from './GlobalVideoPlayer'; // ফাইলটির সঠিক লোকেশন/পাথ অনুযায়ী ফোল্ডার মিলিয়ে নেবেন
+
 const Stack = createStackNavigator();
 
 export default function App() {
@@ -26,11 +29,15 @@ export default function App() {
         <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
         <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-        
+
         {/* Search স্ক্রিনটি ঠিক এইখানে Navigator-এর ভেতরে যুক্ত করা হলো */}
         <Stack.Screen name="Search" component={SearchSettingScreen} options={{ headerShown: false }} />
-        
+
       </Stack.Navigator>
+
+      {/* সব স্ক্রিনের উপরে ভাসমান গ্লোবাল প্লেয়ার এখানে যুক্ত করা হলো */}
+      <GlobalVideoPlayer />
+      
     </NavigationContainer>
   );
 }
