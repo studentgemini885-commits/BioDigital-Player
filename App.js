@@ -31,7 +31,7 @@ export default function App() {
       </Stack.Navigator>
 
       {/* এই প্লেয়ারটি সব স্ক্রিনের উপরে ভাসবে এবং কখনো আনমাউন্ট হবে না */}
-      <GlobalPlayer />
+      <GlobalVideoPlayer />
 
     </NavigationContainer>
   );
