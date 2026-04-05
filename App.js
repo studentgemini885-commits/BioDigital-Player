@@ -9,7 +9,7 @@ import ChannelScreen from './Screens/ChannelScreen';
 import PlaylistScreen from './Screens/PlaylistPage';
 import ShortsScreen from './Screens/ShortsScreen';
 import HistoryPage from './Settings/HistoryPage'; 
-import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
+import SubscriptionsScreen from './Screens/SubscriptionsScreen'; 
 // নতুন যুক্ত করা Search স্ক্রিনটি ইমপোর্ট করা হলো
 import SearchSettingScreen from './Settings/searchsetting'; 
 
