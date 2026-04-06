@@ -1,35 +1,50 @@
-{
-  "license": "0BSD",
-  "main": "index.js",
-  "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web"
-  },
-  "dependencies": {
-    "expo": "~54.0.33",
-    "expo-status-bar": "~3.0.9",
-    "react": "19.1.0",
-    "react-native": "0.81.5",
-    "immer": "^9.0.6",
-    "expo-av": "~16.0.8",
-    "zustand": "^4.5.2",
-    "@types/react": "19.2.14",
-    "@expo/vector-icons": "^15.0.3",
-    "react-native-paper": "4.9.2",
-    "expo-navigation-bar": "~5.0.10",
-    "react-native-screens": "~4.16.0",
-    "react-native-webview": "13.15.0",
-    "expo-build-properties": "~0.12.5",
-    "@react-navigation/stack": "^6.3.20",
-    "@react-navigation/native": "^6.1.9",
-    "react-native-gesture-handler": "~2.28.0",
-    "react-native-safe-area-context": "~5.6.0",
-    "@react-native-async-storage/async-storage": "2.2.0",
-    "expo-media-library": "~16.0.5"
-  },
-  "private": true,
-  "name": "BioDigital-Player",
-  "version": "1.0.0"
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+
+// [FIX]: স্ক্রিনের নচ (Notch) থেকে প্লেয়ারকে সুরক্ষিত রাখার জন্য SafeAreaProvider ইমপোর্ট করা হলো
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// আপনার তৈরি করা সব স্ক্রিন ইমপোর্ট করা হলো
+import HomeScreen from './screens/HomeScreen';
+import PlayerScreen from './screens/PlayerScreen';
+import ChannelScreen from './screens/ChannelScreen';
+import PlaylistScreen from './screens/PlaylistPage';
+import ShortsScreen from './screens/ShortsScreen';
+import HistoryPage from './Settings/HistoryPage'; 
+import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
+import SearchSettingScreen from './Settings/searchsetting'; 
+
+// [FIX]: নতুন যুক্ত করা ডাউনলোড স্ক্রিন এবং গ্লোবাল প্লেয়ার ইমপোর্ট করা হলো
+// (বি.দ্র: আপনার ফোল্ডার স্ট্রাকচার অনুযায়ী DownloadScreen এবং GlobalPlayer এর পাথ './screens/' দেওয়া হলো। যদি পাথ ভিন্ন হয়, তবে তা মিলিয়ে নেবেন)
+import DownloadScreen from './screens/DownloadScreen';
+import GlobalPlayer from './screens/GlobalPlayer'; 
+
+const Stack = createStackNavigator();
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName="Home">
+          <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Channel" component={ChannelScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Playlist" component={PlaylistScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
+          <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Search" component={SearchSettingScreen} options={{ headerShown: false }} />
+          
+          {/* ডাউনলোড স্ক্রিনটি এখানে যুক্ত করা হলো */}
+          <Stack.Screen name="Downloads" component={DownloadScreen} options={{ headerShown: false }} />
+          
+        </Stack.Navigator>
+        
+        {/* গ্লোবাল প্লেয়ারটি স্ট্যাকের বাইরে রাখা হলো যাতে এটি সব স্ক্রিনের উপরে ভাসতে পারে */}
+        <GlobalPlayer />
+        
+      </NavigationContainer>
+    </SafeAreaProvider>
+  );
 }
