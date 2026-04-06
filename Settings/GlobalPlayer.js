@@ -33,8 +33,6 @@ export default function GlobalPlayer() {
   const [streamUrl, setStreamUrl] = useState(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
-  
-  // [FIX]: কোয়ালিটি পরিবর্তনের সময় হার্ডওয়্যার রিমোন্ট ফোর্স করার জন্য ডাইনামিক কি
   const [videoKey, setVideoKey] = useState(Date.now().toString()); 
   
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -69,6 +67,12 @@ export default function GlobalPlayer() {
       setIsPlaying(true);
       pan.setValue({ x: 0, y: 0 });
 
+      // [FIX]: লোকাল ফাইল হলে এপিআই কল বাইপাস করে সরাসরি প্লে করা হবে
+      if (data.videoData && data.videoData.localUri) {
+          setStreamUrl(data.videoData.localUri);
+          return;
+      }
+
       let targetQuality = '720p';
       try {
         const savedAppSet = await AsyncStorage.getItem('appSettings');
@@ -82,9 +86,8 @@ export default function GlobalPlayer() {
     });
 
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
-      if (videoData) {
+      if (videoData && !videoData.localUri) { // লোকাল ভিডিওর ক্ষেত্রে কোয়ালিটি পরিবর্তন প্রযোজ্য নয়
         setStreamUrl(null); 
-        // [FIX]: ক্যাশ ক্লিয়ার করে প্লেয়ার নতুনভাবে রেন্ডার করার নির্দেশ
         setVideoKey(Date.now().toString()); 
         await fetchStreamUrl(videoData.id, newQuality);
       }
@@ -126,7 +129,7 @@ export default function GlobalPlayer() {
                   <View style={styles.loadingBox}><Ionicons name="warning-outline" size={isFull ? 40 : 24} color="#FF4444" /></View>
                ) : streamUrl ? (
                   <Video 
-                    key={videoKey} // [FIX]: হার্ডওয়্যার ফোর্স কি এখানে যুক্ত করা হলো
+                    key={videoKey} 
                     ref={videoRef} source={{ uri: streamUrl }} style={styles.video} 
                     shouldPlay={isPlaying} useNativeControls={isFull} resizeMode={isFull ? "contain" : "cover"} 
                   />
