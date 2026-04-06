@@ -30,6 +30,11 @@ export default function App() {
         <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
         <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Search" component={SearchSettingScreen} options={{ headerShown: false }} />
+        
+        {/* [FIX]: মিসিং স্ক্রিনগুলো এখানে স্ট্যাকে রেজিস্টার করা হলো */}
+        <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Live" component={livescreen} options={{ headerShown: false }} />
+
       </Stack.Navigator>
 
       {/* এই প্লেয়ারটি সব স্ক্রিনের উপরে ভাসবে এবং কখনো আনমাউন্ট হবে না */}
