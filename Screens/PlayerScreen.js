@@ -299,4 +299,4 @@ const styles = StyleSheet.create({
     qualityList: { marginBottom: 20 },
     qualityItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#333' },
     qualityText: { color: '#FFF', fontSize: 16, fontWeight: '500' }
-});
+})
