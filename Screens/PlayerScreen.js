@@ -6,8 +6,8 @@ import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system/legacy'; 
 
-// [FIX]: পাবলিক মেমোরিতে সেভ করার জন্য মিডিয়া লাইব্রেরি ইমপোর্ট করা হলো
-import * as MediaLibrary from 'expo-media-library';
+// [FIX]: এরর সৃষ্টিকারী MediaLibrary এর বদলে Sharing ব্যবহার করা হলো, যা এক্সপোতে বিল্ট-ইন থাকে
+import * as Sharing from 'expo-sharing';
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
@@ -90,24 +90,31 @@ export default function PlayerScreen({ route, navigation }) {
 
       const { uri } = await downloadResumable.downloadAsync();
       
-      // [FIX]: মিডিয়া লাইব্রেরির মাধ্যমে ফোনের আসল গ্যালারি/ভিডিও ফোল্ডারে সেভ করা
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status === 'granted') {
-          await MediaLibrary.createAssetAsync(uri);
-      }
-
       const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
       let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
       
-      // localUri নামে লোকাল পাথ সেভ করা হলো যাতে গ্লোবাল প্লেয়ার বুঝতে পারে
       downloadList.unshift({ id: Date.now().toString(), videoId, title: videoData.title, thumbnail: videoData.thumbnail, quality: item.quality, type: downloadType, localUri: uri, date: new Date().toLocaleDateString() });
       await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
 
       setIsDownloading(false);
-      Alert.alert("সফল", "ডাউনলোড সফল এবং গ্যালারিতে সেভ হয়েছে!");
+      
+      // [FIX]: ডাউনলোড শেষে ব্যবহারকারীকে ভিডিওটি গ্যালারিতে সেভ করার অপশন দেওয়া হলো
+      Alert.alert(
+        "ডাউনলোড সম্পন্ন", 
+        "ভিডিওটি অ্যাপে সেভ হয়েছে। আপনি কি এটি গ্যালারিতে সেভ বা অন্য কাউকে পাঠাতে চান?",
+        [
+            { text: "পরে", style: "cancel" },
+            { text: "গ্যালারিতে সেভ করুন", onPress: async () => {
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(uri);
+                }
+            }}
+        ]
+      );
     } catch (error) {
       setIsDownloading(false);
       Alert.alert("ত্রুটি", "নেটওয়ার্ক সমস্যার কারণে ডাউনলোড ব্যর্থ হয়েছে।");
+      console.error("Download Error:", error);
     }
   };
 
