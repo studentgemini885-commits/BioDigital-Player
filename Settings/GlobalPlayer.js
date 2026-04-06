@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 import { Video } from 'expo-av';
@@ -35,7 +34,27 @@ export default function GlobalPlayer() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   
+  // [FIX]: কোয়ালিটি পরিবর্তনের সময় হার্ডওয়্যার রিমোন্ট ফোর্স করার জন্য ডাইনামিক কি
+  const [videoKey, setVideoKey] = useState(Date.now().toString()); 
+  
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+
+  const fetchStreamUrl = async (vidId, targetQuality) => {
+    try {
+      const numQ = getNumericQuality(targetQuality);
+      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${numQ}&merge=true&t=${Date.now()}`;
+      const res = await fetch(apiUrl);
+      const json = await res.json();
+      if (json.success && json.url) {
+          setStreamUrl(json.url);
+          setErrorMsg(null);
+      } else {
+          setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
+      }
+    } catch(e) { 
+      setErrorMsg("সার্ভার কানেকশন এরর!");
+    }
+  };
 
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
@@ -50,27 +69,24 @@ export default function GlobalPlayer() {
       setIsPlaying(true);
       pan.setValue({ x: 0, y: 0 });
 
+      let targetQuality = '720p';
       try {
-        let targetQuality = '720p';
         const savedAppSet = await AsyncStorage.getItem('appSettings');
         if (savedAppSet) {
             const parsed = JSON.parse(savedAppSet);
             if (parsed.normalVideo) targetQuality = parsed.normalVideo;
         }
+      } catch(e) {}
 
-        const numQ = getNumericQuality(targetQuality);
-        const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${data.videoId}`)}&quality=${numQ}&merge=true&t=${Date.now()}`;
-        
-        const res = await fetch(apiUrl);
-        const json = await res.json();
-        
-        if (json.success && json.url) {
-            setStreamUrl(json.url);
-        } else {
-            setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
-        }
-      } catch(e) { 
-        setErrorMsg("সার্ভার কানেকশন এরর!");
+      await fetchStreamUrl(data.videoId, targetQuality);
+    });
+
+    const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
+      if (videoData) {
+        setStreamUrl(null); 
+        // [FIX]: ক্যাশ ক্লিয়ার করে প্লেয়ার নতুনভাবে রেন্ডার করার নির্দেশ
+        setVideoKey(Date.now().toString()); 
+        await fetchStreamUrl(videoData.id, newQuality);
       }
     });
 
@@ -79,7 +95,7 @@ export default function GlobalPlayer() {
         if (videoData) setPlayerState('full');
     });
 
-    return () => { playSub.remove(); minSub.remove(); maxSub.remove(); };
+    return () => { playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); };
   }, [videoData]);
 
   const panResponder = useRef(PanResponder.create({
@@ -109,7 +125,11 @@ export default function GlobalPlayer() {
                {errorMsg ? (
                   <View style={styles.loadingBox}><Ionicons name="warning-outline" size={isFull ? 40 : 24} color="#FF4444" /></View>
                ) : streamUrl ? (
-                  <Video ref={videoRef} source={{ uri: streamUrl }} style={styles.video} shouldPlay={isPlaying} useNativeControls={isFull} resizeMode={isFull ? "contain" : "cover"} />
+                  <Video 
+                    key={videoKey} // [FIX]: হার্ডওয়্যার ফোর্স কি এখানে যুক্ত করা হলো
+                    ref={videoRef} source={{ uri: streamUrl }} style={styles.video} 
+                    shouldPlay={isPlaying} useNativeControls={isFull} resizeMode={isFull ? "contain" : "cover"} 
+                  />
                ) : (
                   <View style={styles.loadingBox}><ActivityIndicator size={isFull ? "large" : "small"} color="#FF0000" /></View>
                )}
@@ -139,23 +159,17 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  
-  // [FIX]: মিনি কন্টেইনারের চারপাশ ইউটিউবের মতো গোল করা হয়েছে
   miniContainer: { 
     position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, 
     backgroundColor: '#000', zIndex: 9999, elevation: 15, 
     borderRadius: 12, overflow: 'hidden' 
   },
-  
   touchable: { flex: 1, width: '100%', height: '100%' },
   fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%' },
-  
-  // [FIX]: ভিডিও লেয়ারের চারপাশও গোল করা হয়েছে যেন ভিডিও ওভারফ্লো না করে
   miniVideoWrapper: { 
     flex: 1, width: '100%', height: '100%', backgroundColor: '#111', 
     position: 'relative', borderRadius: 12, overflow: 'hidden' 
   },
-  
   video: { width: '100%', height: '100%' },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.2)' },
