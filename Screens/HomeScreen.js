@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import SettingsScreen from '../Settings/SettingsScreen';
 import ShortsScreen from './ShortsScreen'; 
+import LiveScreen from './livescreen'; // [NEW]: লাইভ স্ক্রিন ফাইল ইমপোর্ট করা হলো
 
 const DESKTOP_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const FEED_TOPICS = [ "trending bangladesh", "bangla natok 2026", "bangla new song", "somoy tv live", "cricket highlights", "bangla waz short", "bengali vlog", "bangla news today" ];
@@ -140,7 +141,6 @@ export default function HomeScreen({ route }) {
   };
 
   const renderVideoItem = ({ item }) => {
-    const isSubscribed = subscribedChannels.some(sub => sub.name === item.channel);
     return (
       <View style={styles.videoCard}>
         <TouchableOpacity activeOpacity={0.9} onPress={() => navigation.navigate('Player', { videoId: item.id, videoData: item })}>
@@ -198,6 +198,8 @@ export default function HomeScreen({ route }) {
               ListFooterComponent={isFetchingMore ? <ActivityIndicator size="small" color="#FF0000" style={{ marginVertical: 20 }} /> : null}
             />
           )
+        ) : activeTab === 'Live' ? (
+          <LiveScreen /> 
         ) : activeTab === 'Shorts' ? (
           <ShortsScreen initialVideoId={selectedShortId} />
         ) : activeTab === 'Settings' ? (
@@ -211,7 +213,6 @@ export default function HomeScreen({ route }) {
              </View>
              <View style={styles.meMenuWrapper}>
                  <MeMenuItem icon="time-outline" text="HISTORY" onPress={() => navigation.navigate('History')} />
-                 {/* [FIX]: ডাউনলোড স্ক্রিনের সঠিক নেভিগেশন */}
                  <MeMenuItem icon="download-outline" text="DOWNLOAD" onPress={() => navigation.navigate('Downloads')} />
                  <MeMenuItem icon="notifications-outline" text="MY SUBSCRIBE" onPress={() => navigation.navigate('Subscriptions')} />
                  <MeMenuItem icon="settings-outline" text="SETTINGS" onPress={() => setActiveTab('Settings')} />
@@ -222,9 +223,26 @@ export default function HomeScreen({ route }) {
       </View>
 
       <View style={styles.tabBar}>
-        <TouchableOpacity onPress={() => setActiveTab('Home')} style={styles.tab}><Ionicons name={activeTab==='Home'?'home':'home-outline'} size={24} color={activeTab==='Home'?'#FFF':'#888'} /><Text style={[styles.tabText, activeTab==='Home' && {color:'#FFF'}]}>Home</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => setActiveTab('Shorts')} style={styles.tab}><Ionicons name={activeTab==='Shorts'?'play-circle':'play-circle-outline'} size={24} color={activeTab==='Shorts'?'#FFF':'#888'} /><Text style={[styles.tabText, activeTab==='Shorts' && {color:'#FFF'}]}>Shorts</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => setActiveTab('ME')} style={styles.tab}><Ionicons name={(activeTab==='ME' || activeTab==='Settings') ? 'person' : 'person-outline'} size={24} color={(activeTab==='ME' || activeTab==='Settings') ? '#FFF' : '#888'} /><Text style={[styles.tabText, (activeTab==='ME' || activeTab==='Settings') && {color:'#FFF'}]}>ME</Text></TouchableOpacity>
+        <TouchableOpacity onPress={async () => { setActiveTab('Home'); setActiveQuery(await getAlgorithmicTopic()); }} style={styles.tab}>
+           <Ionicons name={activeTab==='Home'?'home':'home-outline'} size={24} color={activeTab==='Home'?'#FFF':'#888'} />
+           <Text style={[styles.tabText, activeTab==='Home' && {color:'#FFF'}]}>Home</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity onPress={() => setActiveTab('Shorts')} style={styles.tab}>
+           <Ionicons name={activeTab==='Shorts'?'play-circle':'play-circle-outline'} size={24} color={activeTab==='Shorts'?'#FFF':'#888'} />
+           <Text style={[styles.tabText, activeTab==='Shorts' && {color:'#FFF'}]}>Shorts</Text>
+        </TouchableOpacity>
+
+        {/* [FIX]: লাইভ বাটনে ক্লিক করলে এখন লাইভ স্ক্রিন ওপেন হবে */}
+        <TouchableOpacity onPress={() => setActiveTab('Live')} style={styles.tab}>
+           <Ionicons name={activeTab==='Live'?'radio':'radio-outline'} size={24} color={activeTab==='Live'?'#FF0000':'#888'} />
+           <Text style={[styles.tabText, activeTab==='Live' && {color:'#FF0000'}]}>Live</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setActiveTab('ME')} style={styles.tab}>
+           <Ionicons name={(activeTab==='ME' || activeTab==='Settings') ? 'person' : 'person-outline'} size={24} color={(activeTab==='ME' || activeTab==='Settings') ? '#FFF' : '#888'} />
+           <Text style={[styles.tabText, (activeTab==='ME' || activeTab==='Settings') && {color:'#FFF'}]}>ME</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
