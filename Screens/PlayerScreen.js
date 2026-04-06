@@ -26,7 +26,6 @@ export default function PlayerScreen({ route, navigation }) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
-  // [FIX]: স্ক্রিন ফোকাস হলে ম্যাক্সিমাইজ এবং ব্লার হলে মিনিমাইজ হবে মিলি-সেকেন্ডে
   useFocusEffect(
     useCallback(() => {
       DeviceEventEmitter.emit('maximizeVideo');
@@ -101,15 +100,18 @@ export default function PlayerScreen({ route, navigation }) {
     fetchDownloadLinks(type);
   };
 
+  // [FIX]: এপিআই রাউট এবং অবজেক্ট কি-ম্যাপিং আপডেট করা হয়েছে
   const fetchDownloadLinks = async (type) => {
     try {
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const apiUrl = `${MY_API_SERVER}/api/download?url=${encodeURIComponent(targetUrl)}&type=${type}`;
+      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&action=download`;
+      
       const response = await fetch(apiUrl);
       const data = await response.json();
 
-      if (data.success && data.links) {
-        setDownloadLinks(data.links);
+      // সার্ভার রেসপন্সের 'availableLinks' এর সাথে সিঙ্ক করা হলো
+      if (data.success && data.availableLinks) {
+        setDownloadLinks(data.availableLinks);
         setDownloadStep('list');
       } else {
         Alert.alert("ত্রুটি", "কোনো লিংক পাওয়া যায়নি।");
@@ -151,7 +153,6 @@ export default function PlayerScreen({ route, navigation }) {
   const renderHeader = () => (
     <View style={styles.detailsContainer}>
       <View style={styles.titleRow}>
-         {/* [FIX]: ডাউনলোড বাটন ডান সাইডে এবং শুধুমাত্র আইকন */}
          <TouchableOpacity activeOpacity={0.8} onPress={() => setIsExpandedDesc(!isExpandedDesc)} style={styles.titleTextContainer}>
             <Text style={styles.mainTitle} numberOfLines={isExpandedDesc ? null : 2}>{videoData?.title}</Text>
          </TouchableOpacity>
