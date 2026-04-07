@@ -177,7 +177,7 @@ export default function HomeScreen({ route }) {
              <Text style={styles.logoText}>MyTube</Text>
           </View>
           {/* [FIXED]: এখানে 'Search' এর পরিবর্তে 'SearchSettings' দেওয়া হয়েছে */}
-          <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('SearchSettings')}>
+          <TouchableOpacity style={styles.searchBar} activeOpacity={0.8} onPress={() => navigation.navigate('searchsettings')}>
             <Text style={{ flex: 1, color: '#888', fontSize: 14 }}>{searchQuery || "সার্চ..."}</Text>
             <Ionicons name="search" size={18} color="#AAA" />
           </TouchableOpacity>
