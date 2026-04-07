@@ -2,50 +2,63 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
-// [FIX]: স্ক্রিনের নচ (Notch) থেকে প্লেয়ারকে সুরক্ষিত রাখার জন্য SafeAreaProvider ইমপোর্ট করা হলো
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-
-// আপনার তৈরি করা সব স্ক্রিন ইমপোর্ট করা হলো
+// ==========================================
+// ১. Screens ফোল্ডার থেকে ফাইল ইমপোর্ট
+// ==========================================
 import HomeScreen from './Screens/HomeScreen';
-import PlayerScreen from './Screens/PlayerScreen';
 import ChannelScreen from './Screens/ChannelScreen';
-import PlayerStore from './Settings/PlayerStore';
-import PlaylistScreen from './Screens/PlaylistPage';
+import PlayerScreen from './Screens/PlayerScreen';
+import PlaylistPage from './Screens/PlaylistPage';
 import ShortsScreen from './Screens/ShortsScreen';
-import HistoryPage from './Settings/HistoryPage'; 
-import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
-import SearchSetting from './Settings/searchsetting'; 
+import SubscriptionsScreen from './Screens/SubscriptionsScreen';
+import LiveScreen from './Screens/livescreen';
 
-// [FIX]: নতুন যুক্ত করা ডাউনলোড স্ক্রিন এবং গ্লোবাল প্লেয়ার ইমপোর্ট করা হলো
-// (বি.দ্র: আপনার ফোল্ডার স্ট্রাকচার অনুযায়ী DownloadScreen এবং GlobalPlayer এর পাথ './screens/' দেওয়া হলো। যদি পাথ ভিন্ন হয়, তবে তা মিলিয়ে নেবেন)
-import downloadscreen from './Settings/downloadscreen';
-import GlobalPlayer from './Settings/GlobalPlayer'; 
+// ==========================================
+// ২. Settings ফোল্ডার থেকে ফাইল ইমপোর্ট
+// ==========================================
+import SettingsScreen from './Settings/SettingsScreen';
+import HistoryPage from './Settings/HistoryPage';
+import DownloadScreen from './Settings/downloadscreen';
+import SearchSetting from './Settings/searchsetting';
+
+// ==========================================
+// ৩. স্টেট ম্যানেজমেন্ট ফাইল (Optional / Context Providers)
+// ==========================================
+/* বিঃদ্রঃ: GlobalState.js, GlobalPlayer.js এবং PlayerStore.js সাধারণত 
+  Context API বা Redux/Zustand স্টোর হিসেবে কাজ করে। যদি এগুলো Context Provider হয়, 
+  তবে NavigationContainer-কে সেই Provider দিয়ে র‍্যাপ (Wrap) করতে হবে।
+  উদাহরণস্বরূপ:
+  import { GlobalStateProvider } from './Screens/GlobalState';
+*/
 
 const Stack = createStackNavigator();
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator initialRouteName="Home">
-          <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Player" component={PlayerScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Channel" component={ChannelScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Playlist" component={PlaylistScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Shorts" component={ShortsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="History" component={HistoryPage} options={{ headerShown: false }} />
-          <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Search" component={SearchSetting} options={{ headerShown: false }} />
-          
-          {/* ডাউনলোড স্ক্রিনটি এখানে যুক্ত করা হলো */}
-          <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
-          
+    // <GlobalStateProvider> <NavigationContainer>
+        <Stack.Navigator 
+          initialRouteName="Home"
+          screenOptions={{
+            headerShown: false, // ডিফল্ট হেডার লুকানোর জন্য (প্রয়োজনে true করতে পারেন)
+            cardStyle: { backgroundColor: '#000000' } // ডার্ক থিমের জন্য
+          }}
+        >
+          {/* মূল স্ক্রিনসমূহ */}
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="Channel" component={ChannelScreen} />
+          <Stack.Screen name="Player" component={PlayerScreen} />
+          <Stack.Screen name="Playlist" component={PlaylistPage} />
+          <Stack.Screen name="Shorts" component={ShortsScreen} />
+          <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} />
+          <Stack.Screen name="Live" component={LiveScreen} />
+
+          {/* সেটিংস এবং অন্যান্য স্ক্রিনসমূহ */}
+          <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="History" component={HistoryPage} />
+          <Stack.Screen name="Downloads" component={DownloadScreen} />
+          <Stack.Screen name="SearchSettings" component={SearchSetting} />
         </Stack.Navigator>
-        
-        {/* গ্লোবাল প্লেয়ারটি স্ট্যাকের বাইরে রাখা হলো যাতে এটি সব স্ক্রিনের উপরে ভাসতে পারে */}
-        <GlobalPlayer />
-        
       </NavigationContainer>
-    </SafeAreaProvider>
+    // </GlobalStateProvider>
   );
 }
