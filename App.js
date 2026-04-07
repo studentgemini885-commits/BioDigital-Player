@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import HomeScreen from './Screens/HomeScreen';
 import PlayerScreen from './Screens/PlayerScreen';
 import ChannelScreen from './Screens/ChannelScreen';
+import PlayerStore from './Settings/PlayerStore';
 import PlaylistScreen from './Screens/PlaylistPage';
 import ShortsScreen from './Screens/ShortsScreen';
 import HistoryPage from './Settings/HistoryPage'; 
