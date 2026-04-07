@@ -6,19 +6,19 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // আপনার তৈরি করা সব স্ক্রিন ইমপোর্ট করা হলো
-import HomeScreen from './screens/HomeScreen';
-import PlayerScreen from './screens/PlayerScreen';
-import ChannelScreen from './screens/ChannelScreen';
-import PlaylistScreen from './screens/PlaylistPage';
-import ShortsScreen from './screens/ShortsScreen';
+import HomeScreen from './Screens/HomeScreen';
+import PlayerScreen from './Screens/PlayerScreen';
+import ChannelScreen from './Screens/ChannelScreen';
+import PlaylistScreen from './Screens/PlaylistPage';
+import ShortsScreen from './Screens/ShortsScreen';
 import HistoryPage from './Settings/HistoryPage'; 
 import SubscriptionsScreen from './screens/SubscriptionsScreen'; 
 import SearchSettingScreen from './Settings/searchsetting'; 
 
 // [FIX]: নতুন যুক্ত করা ডাউনলোড স্ক্রিন এবং গ্লোবাল প্লেয়ার ইমপোর্ট করা হলো
 // (বি.দ্র: আপনার ফোল্ডার স্ট্রাকচার অনুযায়ী DownloadScreen এবং GlobalPlayer এর পাথ './screens/' দেওয়া হলো। যদি পাথ ভিন্ন হয়, তবে তা মিলিয়ে নেবেন)
-import DownloadScreen from './screens/DownloadScreen';
-import GlobalPlayer from './screens/GlobalPlayer'; 
+import DownloadScreen from './Screens/DownloadScreen';
+import GlobalPlayer from './Screens/GlobalPlayer'; 
 
 const Stack = createStackNavigator();
 
