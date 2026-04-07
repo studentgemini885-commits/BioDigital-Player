@@ -17,7 +17,7 @@ import SearchSettingScreen from './Settings/searchsetting';
 
 // [FIX]: নতুন যুক্ত করা ডাউনলোড স্ক্রিন এবং গ্লোবাল প্লেয়ার ইমপোর্ট করা হলো
 // (বি.দ্র: আপনার ফোল্ডার স্ট্রাকচার অনুযায়ী DownloadScreen এবং GlobalPlayer এর পাথ './screens/' দেওয়া হলো। যদি পাথ ভিন্ন হয়, তবে তা মিলিয়ে নেবেন)
-import DownloadScreen from './Screens/DownloadScreen';
+import downloadscreen from './Settings/downloadscreen';
 import GlobalPlayer from './Screens/GlobalPlayer'; 
 
 const Stack = createStackNavigator();
@@ -37,7 +37,7 @@ export default function App() {
           <Stack.Screen name="Search" component={SearchSettingScreen} options={{ headerShown: false }} />
           
           {/* ডাউনলোড স্ক্রিনটি এখানে যুক্ত করা হলো */}
-          <Stack.Screen name="Downloads" component={DownloadScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Downloads" component={downloadscreen} options={{ headerShown: false }} />
           
         </Stack.Navigator>
         
