@@ -75,7 +75,7 @@ export default function SearchSettingScreen() {
   };
 
   const handleSearchSubmit = (searchTerm) => {
-    const text = searchTerm || query;
+    const text = typeof searchTerm === 'string' ? searchTerm : query; // নিশ্চিত করা হলো যেন শুধু স্ট্রিং পাস হয়
     if (text.trim().length > 0) {
       const updatedHistory = [text.trim(), ...history.filter(item => item !== text.trim())].slice(0, 10);
       setHistory(updatedHistory); global.searchHistory = updatedHistory;
@@ -143,7 +143,7 @@ export default function SearchSettingScreen() {
       <View style={styles.searchHeader}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#FFF" /></TouchableOpacity>
         <View style={styles.searchInputContainer}>
-          <TextInput ref={inputRef} style={styles.searchInput} placeholder="Search YouTube" placeholderTextColor="#AAA" value={query} onChangeText={handleTextChange} onSubmitEditing={() => handleSearchSubmit()} returnKeyType="search" autoCapitalize="none" />
+          <TextInput ref={inputRef} style={styles.searchInput} placeholder="Search YouTube" placeholderTextColor="#AAA" value={query} onChangeText={handleTextChange} onSubmitEditing={() => handleSearchSubmit(query)} returnKeyType="search" autoCapitalize="none" />
           {query.length > 0 && (<TouchableOpacity onPress={() => { setQuery(''); setHasSearched(false); inputRef.current?.focus(); }} style={styles.clearBtn}><Ionicons name="close-circle" size={20} color="#AAA" /></TouchableOpacity>)}
         </View>
       </View>
