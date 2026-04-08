@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, StyleSheet, Text, ActivityIndicator, TouchableOpacity, FlatList, Image, Dimensions, StatusBar, SafeAreaView, ScrollView, Modal, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Audio } from 'expo-av'; // [FIX]: ব্যাকগ্রাউন্ড অডিওর জন্য যুক্ত করা হলো
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
@@ -31,6 +31,21 @@ export default function PlayerScreen({ route, navigation }) {
       return () => DeviceEventEmitter.emit('minimizeVideo');
     }, [])
   );
+
+  // [FIX]: স্ক্রিন অফ করলেও অডিও/ভিডিও চলার জন্য অডিও ইঞ্জিন কনফিগারেশন
+  useEffect(() => {
+    const enableBackgroundAudio = async () => {
+      try {
+        await Audio.setAudioModeAsync({
+          staysActiveInBackground: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) { console.log(e); }
+    };
+    enableBackgroundAudio();
+  }, []);
 
   useEffect(() => {
     checkSubscriptionStatus();
@@ -61,7 +76,6 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {}
   };
 
-  // [FIX]: সার্ভারকে ডাউনলোডের দায়িত্ব বুঝিয়ে দেওয়া হচ্ছে
   const handleDownloadExecute = async (item) => {
     setShowDownloadModal(false);
     setIsDownloading(true);
@@ -71,7 +85,6 @@ export default function PlayerScreen({ route, navigation }) {
     const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
     try {
-        // ডাউনলোড স্ক্রিনে দেখানোর জন্য ডেটাবেস এন্ট্রি (Pending State)
         const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
         let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
 
@@ -81,7 +94,6 @@ export default function PlayerScreen({ route, navigation }) {
         });
         await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
 
-        // সার্ভারকে API কল করে ডাউনলোড স্টার্ট করা
         const apiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&url=${encodeURIComponent(targetUrl)}&quality=${item.quality}&type=${downloadType}&title=${encodeURIComponent(videoData.title)}`;
         fetch(apiUrl).catch(e => console.log(e));
 
@@ -116,9 +128,33 @@ export default function PlayerScreen({ route, navigation }) {
     }
   };
 
+  // [FIX]: অফলাইন প্লেলিস্ট রেন্ডার করার লজিক
   const fetchRelatedVideos = async (isLoadMore = false) => {
     if (isLoadMore) setIsLoadingMore(true);
     try {
+      // যদি প্লে করা ফাইলটি অফলাইন/ডাউনলোড করা হয়
+      if (videoData.localUri || videoData.channel === 'Downloaded File') {
+        const stored = await AsyncStorage.getItem('recorded_downloads');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const offlineVids = parsed
+            .filter(item => item.videoId !== videoId && item.isCompleted) // নিজেরটা বাদে বাকি কমপ্লিট ফাইলগুলো
+            .map(item => ({
+              id: item.videoId,
+              title: item.title,
+              channel: 'Downloaded File',
+              views: `অফলাইন • ${item.quality} • ${item.type?.toUpperCase()}`,
+              thumbnail: item.thumbnail,
+              localUri: item.localUri,
+              type: item.type
+            }));
+          setRelatedVideos(offlineVids);
+        }
+        setIsLoadingMore(false);
+        return;
+      }
+
+      // অনলাইনের জন্য ডিফল্ট লজিক
       const response = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(videoData.channel || "trending bangla")}`);
       const text = await response.text();
       const match = text.match(/var ytInitialData = (.*?);<\/script>/);
@@ -149,9 +185,12 @@ export default function PlayerScreen({ route, navigation }) {
          <TouchableOpacity activeOpacity={0.8} onPress={() => setIsExpandedDesc(!isExpandedDesc)} style={styles.titleTextContainer}>
             <Text style={styles.mainTitle} numberOfLines={isExpandedDesc ? null : 2}>{videoData?.title}</Text>
          </TouchableOpacity>
-         <TouchableOpacity style={styles.downloadIconBtn} onPress={() => { setShowDownloadModal(true); setDownloadStep('selection'); }}>
-            <Ionicons name="download-outline" size={24} color="#FFF" />
-         </TouchableOpacity>
+         {/* ডাউনলোড করা ফাইলে ডাউনলোড বাটন হাইড করা */}
+         {!videoData.localUri && (
+           <TouchableOpacity style={styles.downloadIconBtn} onPress={() => { setShowDownloadModal(true); setDownloadStep('selection'); }}>
+              <Ionicons name="download-outline" size={24} color="#FFF" />
+           </TouchableOpacity>
+         )}
       </View>
       <View style={styles.metaRow}>
          <Text style={styles.mainViews}>{videoData?.views} {videoData?.publishedTime ? `• ${videoData.publishedTime}` : ''}</Text>
@@ -159,17 +198,20 @@ export default function PlayerScreen({ route, navigation }) {
       </View>
       <View style={styles.channelRow}>
         <TouchableOpacity style={styles.channelLeft} onPress={() => navigation.navigate('Channel', { channelName: videoData.channel, channelAvatar: videoData.avatar })}>
-          <Image source={{ uri: videoData.avatar }} style={styles.channelAvatar} />
+          <Image source={{ uri: videoData.avatar || 'https://via.placeholder.com/40' }} style={styles.channelAvatar} />
           <View style={styles.channelTextCol}>
             <Text style={styles.channelName} numberOfLines={1}>{videoData.channel}</Text>
-            <Text style={styles.subCount}>Subscriber Info</Text>
+            <Text style={styles.subCount}>{videoData.localUri ? 'Offline Storage' : 'Subscriber Info'}</Text>
           </View>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.subscribeBtn, isSubscribed && styles.subscribedBtn]} onPress={toggleSubscription}>
-          <Text style={[styles.subscribeText, isSubscribed && styles.subscribedText]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
-        </TouchableOpacity>
+        {!videoData.localUri && (
+          <TouchableOpacity style={[styles.subscribeBtn, isSubscribed && styles.subscribedBtn]} onPress={toggleSubscription}>
+            <Text style={[styles.subscribeText, isSubscribed && styles.subscribedText]}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</Text>
+          </TouchableOpacity>
+        )}
       </View>
       <View style={styles.divider} />
+      {videoData.localUri && <Text style={styles.offlineListTitle}>আপনার ডাউনলোড করা অন্যান্য ফাইলসমূহ</Text>}
     </View>
   );
 
@@ -185,9 +227,22 @@ export default function PlayerScreen({ route, navigation }) {
            <Ionicons name="search" size={24} color="#FFF" />
         </TouchableOpacity>
       </View>
-      <View style={styles.playerWrapper}></View>
 
-      {/* ১ সেকেন্ডের মেসেজ */}
+      {/* [FIX]: অডিও হলে কাস্টম কভার ইমেজ এবং মিউজিক আইকন দেখানো */}
+      <View style={styles.playerWrapper}>
+        {videoData?.type === 'audio' && (
+          <View style={styles.audioPosterContainer}>
+            <Image source={{ uri: videoData.thumbnail }} style={styles.audioPosterBg} blurRadius={15} />
+            <View style={styles.audioPosterOverlay}>
+              <View style={styles.audioIconCircle}>
+                <Ionicons name="musical-notes" size={50} color="#FFF" />
+              </View>
+              <Text style={styles.audioPosterText}>অডিও প্লে হচ্ছে</Text>
+            </View>
+          </View>
+        )}
+      </View>
+
       {isDownloading && (
         <View style={styles.toastContainer}>
            <Text style={styles.toastText}>ডাউনলোড শুরু হচ্ছে...</Text>
@@ -205,9 +260,17 @@ export default function PlayerScreen({ route, navigation }) {
               <Text style={styles.recTitle} numberOfLines={2}>{item.title}</Text>
               <Text style={styles.recMeta}>{item.channel} • {item.views}</Text>
             </View>
+            {/* অফলাইন লিস্টে টাইপের আইকন দেখানো */}
+            {item.localUri && (
+              <View style={styles.offlineTypeIndicator}>
+                <Ionicons name={item.type === 'audio' ? "musical-notes" : "videocam"} size={14} color="#00BFA5" />
+              </View>
+            )}
           </TouchableOpacity>
         )}
-        onEndReached={() => fetchRelatedVideos(true)}
+        onEndReached={() => {
+           if(!videoData.localUri) fetchRelatedVideos(true); // অফলাইনে লোড মোর অফ
+        }}
         onEndReachedThreshold={0.5}
         showsVerticalScrollIndicator={false}
       />
@@ -247,7 +310,14 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0F0F0F' },
     appHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, height: 50 },
     headerIconBtn: { padding: 10 },
-    playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: 'transparent' },
+    playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: '#000' },
+    // অডিও পোস্টারের ডিজাইন
+    audioPosterContainer: { flex: 1, width: '100%', height: '100%', position: 'relative', backgroundColor: '#111' },
+    audioPosterBg: { width: '100%', height: '100%', opacity: 0.5 },
+    audioPosterOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
+    audioIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0, 191, 165, 0.2)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#00BFA5', marginBottom: 10 },
+    audioPosterText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3 },
+    // অন্যান্য ডিজাইন
     toastContainer: { backgroundColor: '#00BFA5', padding: 10, alignItems: 'center', justifyContent: 'center' },
     toastText: { color: '#000', fontSize: 14, fontWeight: 'bold' },
     detailsContainer: { padding: 12 },
@@ -259,6 +329,7 @@ const styles = StyleSheet.create({
     mainViews: { color: '#AAA', fontSize: 12 },
     moreText: { color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 8 },
     divider: { height: 1, backgroundColor: '#222', marginVertical: 10 },
+    offlineListTitle: { color: '#00BFA5', fontSize: 16, fontWeight: 'bold', marginTop: 5, marginBottom: 5 },
     channelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     channelLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     channelAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, backgroundColor: '#333' },
@@ -269,11 +340,12 @@ const styles = StyleSheet.create({
     subscribeText: { color: '#000', fontSize: 14, fontWeight: 'bold' },
     subscribedBtn: { backgroundColor: '#222' },
     subscribedText: { color: '#FFF' },
-    recCard: { flexDirection: 'row', padding: 10 },
+    recCard: { flexDirection: 'row', padding: 10, position: 'relative' },
     recThumb: { width: 140, height: 80, borderRadius: 8, backgroundColor: '#222' },
     recInfo: { flex: 1, marginLeft: 12, justifyContent: 'center' },
     recTitle: { color: '#FFF', fontSize: 14 },
-    recMeta: { color: '#AAA', fontSize: 11 },
+    recMeta: { color: '#AAA', fontSize: 11, marginTop: 4 },
+    offlineTypeIndicator: { position: 'absolute', bottom: 15, left: 15, backgroundColor: 'rgba(0,0,0,0.7)', padding: 4, borderRadius: 12 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: '#1E1E1E', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: height * 0.6 },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
