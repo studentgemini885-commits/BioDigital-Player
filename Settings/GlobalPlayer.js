@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator, Image } from 'react-native';
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
@@ -35,6 +35,9 @@ export default function GlobalPlayer() {
   const [errorMsg, setErrorMsg] = useState(null);
   const [videoKey, setVideoKey] = useState(Date.now().toString()); 
   
+  // [FIX]: গ্লোবাল প্লেয়ারের নিজস্ব অডিও মোড স্টেট
+  const [isAudioMode, setIsAudioMode] = useState(false);
+  
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
   const fetchStreamUrl = async (vidId, targetQuality) => {
@@ -58,6 +61,8 @@ export default function GlobalPlayer() {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
+        // নতুন ভিডিও প্লে হওয়ার সময় টাইপ চেক করে অডিও মোড সেট করা
+        setIsAudioMode(data.videoData?.type === 'audio');
         return;
       }
       setVideoData(data.videoData);
@@ -65,6 +70,7 @@ export default function GlobalPlayer() {
       setStreamUrl(null);
       setErrorMsg(null);
       setIsPlaying(true);
+      setIsAudioMode(data.videoData?.type === 'audio');
       pan.setValue({ x: 0, y: 0 });
 
       if (data.videoData && data.videoData.localUri) {
@@ -97,21 +103,9 @@ export default function GlobalPlayer() {
         if (videoData) setPlayerState('full');
     });
 
-    // [FIX]: অডিও মোড চালু হলে গ্লোবাল ভিডিও থামানো এবং লুকিয়ে ফেলার ইভেন্ট
-    const pauseSub = DeviceEventEmitter.addListener('pauseVideo', async () => {
-      if (videoRef.current) {
-          await videoRef.current.pauseAsync();
-          setIsPlaying(false);
-      }
-    });
-
-    const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
-      if (videoRef.current) {
-          await videoRef.current.pauseAsync();
-      }
-      setPlayerState('hidden');
-      setStreamUrl(null);
-      setIsPlaying(false);
+    // [FIX]: প্লেয়ার স্ক্রিন থেকে অডিও টগলের সিগন্যাল রিসিভ করা
+    const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
+        setIsAudioMode(mode);
     });
 
     return () => { 
@@ -119,8 +113,7 @@ export default function GlobalPlayer() {
         qualitySub.remove(); 
         minSub.remove(); 
         maxSub.remove(); 
-        pauseSub.remove(); // ক্লিনআপ
-        stopSub.remove();  // ক্লিনআপ
+        toggleAudioSub.remove();
     };
   }, [videoData]);
 
@@ -154,14 +147,27 @@ export default function GlobalPlayer() {
                   <Video 
                     key={videoKey} 
                     ref={videoRef} source={{ uri: streamUrl }} style={styles.video} 
-                    shouldPlay={isPlaying} useNativeControls={isFull} resizeMode={isFull ? "contain" : "cover"} 
+                    shouldPlay={isPlaying} useNativeControls={isFull && !isAudioMode} resizeMode={isFull ? "contain" : "cover"} 
                   />
                ) : (
                   <View style={styles.loadingBox}><ActivityIndicator size={isFull ? "large" : "small"} color="#FF0000" /></View>
                )}
+
+               {/* [FIX]: জিরো-ল্যাটেন্সি অডিও কভার (এটি গ্লোবাল ভিডিওর ওপরে বসে ভিডিও ঢেকে দেয়) */}
+               {isAudioMode && (
+                  <View style={styles.audioPosterContainer}>
+                    <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={isFull ? 15 : 5} />
+                    <View style={styles.audioPosterOverlay}>
+                      <View style={[styles.audioIconCircle, !isFull && { width: 40, height: 40, borderRadius: 20 }]}>
+                        <Ionicons name="musical-notes" size={isFull ? 50 : 20} color="#FFF" />
+                      </View>
+                      {isFull && <Text style={styles.audioPosterText}>ব্যাকগ্রাউন্ড অডিও প্লে হচ্ছে</Text>}
+                    </View>
+                  </View>
+               )}
                
                {!isFull && (
-                  <View style={styles.overlay}>
+                  <View style={[styles.overlay, isAudioMode ? {zIndex: 20} : {}]}>
                      <TouchableOpacity style={styles.miniPlayBtn} onPress={async () => {
                          const status = await videoRef.current?.getStatusAsync();
                          if (status?.isPlaying) { await videoRef.current?.pauseAsync(); setIsPlaying(false); } 
@@ -185,20 +191,20 @@ export default function GlobalPlayer() {
 
 const styles = StyleSheet.create({
   fullContainer: { position: 'absolute', top: 55, left: 0, width: width, height: PLAYER_HEIGHT, zIndex: 9999, backgroundColor: '#000' },
-  miniContainer: { 
-    position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, 
-    backgroundColor: '#000', zIndex: 9999, elevation: 15, 
-    borderRadius: 12, overflow: 'hidden' 
-  },
+  miniContainer: { position: 'absolute', bottom: 80, right: 15, width: MINI_WIDTH, height: MINI_HEIGHT, backgroundColor: '#000', zIndex: 9999, elevation: 15, borderRadius: 12, overflow: 'hidden' },
   touchable: { flex: 1, width: '100%', height: '100%' },
-  fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%' },
-  miniVideoWrapper: { 
-    flex: 1, width: '100%', height: '100%', backgroundColor: '#111', 
-    position: 'relative', borderRadius: 12, overflow: 'hidden' 
-  },
+  fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%', position: 'relative' },
+  miniVideoWrapper: { flex: 1, width: '100%', height: '100%', backgroundColor: '#111', position: 'relative', borderRadius: 12, overflow: 'hidden' },
   video: { width: '100%', height: '100%' },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.2)' },
   miniPlayBtn: { position: 'absolute', top: '50%', left: 10, marginTop: -13 },
-  miniCloseBtn: { position: 'absolute', top: 4, right: 4, padding: 2 }
+  miniCloseBtn: { position: 'absolute', top: 4, right: 4, padding: 2 },
+  
+  // অডিও কভারের স্টাইলস
+  audioPosterContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, backgroundColor: '#111' },
+  audioPosterBg: { width: '100%', height: '100%', opacity: 0.5 },
+  audioPosterOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
+  audioIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0, 191, 165, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#00BFA5', marginBottom: 10 },
+  audioPosterText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }
 });
