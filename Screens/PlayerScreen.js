@@ -4,9 +4,18 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-// [UPDATE]: expo-file-system এর পরিবর্তে react-native-blob-util যুক্ত করা হলো
-import ReactNativeBlobUtil from 'react-native-blob-util';
+import * as FileSystem from 'expo-file-system'; 
 import * as MediaLibrary from 'expo-media-library';
+import * as Notifications from 'expo-notifications';
+
+// সিস্টেম নোটিফিকেশনের ডিফল্ট আচরণ কনফিগার করা হলো
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
@@ -25,7 +34,6 @@ export default function PlayerScreen({ route, navigation }) {
   const [downloadLinks, setDownloadLinks] = useState([]);
   const [downloadType, setDownloadType] = useState('');
 
-  // Native Download Manager ব্যবহার করায় অ্যাপের ভেতরের প্রোগ্রেস স্টেটের আর প্রয়োজন নেই, তবে কোডের অন্যান্য অংশে নির্ভরতার জন্য স্টেটগুলো রাখা হলো।
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
@@ -67,59 +75,93 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {}
   };
 
-  // [UPDATE]: Android Native Download Manager ব্যবহার করে ফাংশনটি আপডেট করা হলো
+  // [UPDATED FIX]: লাইভ নোটিফিকেশন সহ নতুন স্ট্যান্ডার্ড ডাউনলোড সিস্টেম
   const handleDownloadExecute = async (item) => {
     try {
       setShowDownloadModal(false);
+      setIsDownloading(true);
+      setDownloadProgress(0);
 
       const safeTitle = (videoData.title || 'video').replace(/[^a-zA-Z0-9]/g, '_');
       const fileExt = downloadType === 'audio' ? 'mp3' : 'mp4';
-      const qualitySuffix = item.quality ? item.quality.replace(/[^0-9]/g, '') : 'hq';
-      const fileName = `${safeTitle}_${qualitySuffix}p.${fileExt}`;
+      const filename = `${safeTitle}_${item.quality.replace(/[^0-9]/g, '')}p.${fileExt}`;
+      const fileUri = `${FileSystem.documentDirectory}${filename}`;
 
-      const { dirs } = ReactNativeBlobUtil.fs;
+      // ১. প্রারম্ভিক নোটিফিকেশন তৈরি
+      let notificationId = null;
+      try {
+        notificationId = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `ডাউনলোড শুরু হচ্ছে...`,
+            body: filename,
+          },
+          trigger: null,
+        });
+      } catch (e) {
+        console.error("Notification init error:", e);
+      }
 
-      ReactNativeBlobUtil.config({
-        fileCache: true,
-        addAndroidDownloads: {
-          useDownloadManager: true, // এটি Android-এর নিজস্ব ডাউনলোডার চালু করবে
-          notification: true, // এটি Vidmate-এর মতো নোটিফিকেশন বারে প্রোগ্রেস দেখাবে
-          title: fileName,
-          description: 'ডাউনলোড হচ্ছে...',
-          mime: downloadType === 'audio' ? 'audio/mpeg' : 'video/mp4',
-          mediaScannable: true, // মিডিয়া স্ক্যানার চালু থাকায় এটি স্বয়ংক্রিয়ভাবে গ্যালারিতে দেখাবে
-          path: `${dirs.DownloadDir}/${fileName}`,
+      // ২. ফাইল সিস্টেম ডাউনলোড এবং লাইভ নোটিফিকেশন আপডেট
+      const downloadResumable = FileSystem.createDownloadResumable(
+        item.url, 
+        fileUri, 
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+          }
+        },
+        async (downloadInfo) => { 
+            const progress = downloadInfo.totalBytesWritten / downloadInfo.totalBytesExpectedToWrite;
+            setDownloadProgress(progress); 
+            
+            const percentage = Math.round(progress * 100);
+            
+            // নোটিফিকেশন ওভারলোড এড়াতে প্রতি ১০% পরপর আপডেট
+            if (notificationId && percentage % 10 === 0) {
+                await Notifications.scheduleNotificationAsync({
+                  identifier: notificationId,
+                  content: {
+                    title: `ডাউনলোড হচ্ছে... ${percentage}%`,
+                    body: filename,
+                  },
+                  trigger: null,
+                });
+            }
         }
-      })
-      .fetch('GET', item.url, {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      })
-      .then(async (res) => {
-         // System Download Manager এ টাস্ক যুক্ত হলে এই মেসেজটি দেখাবে
-         Alert.alert("ডাউনলোড শুরু হয়েছে", "নোটিফিকেশন বার লক্ষ্য করুন।");
+      );
 
-         const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
-         let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
+      const { uri } = await downloadResumable.downloadAsync();
 
-         downloadList.unshift({ 
-             id: Date.now().toString(), 
-             videoId, 
-             title: videoData.title, 
-             thumbnail: videoData.thumbnail, 
-             quality: item.quality, 
-             type: downloadType, 
-             localUri: res.path(), 
-             date: new Date().toLocaleDateString() 
-         });
-         await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
-      })
-      .catch((error) => {
-         Alert.alert("ত্রুটি", "ডাউনলোড শুরু করা সম্ভব হয়নি।");
-         console.error("Download Error:", error);
-      });
+      // ৩. সফল ডাউনলোডের চূড়ান্ত নোটিফিকেশন
+      if (notificationId) {
+        await Notifications.scheduleNotificationAsync({
+          identifier: notificationId,
+          content: {
+            title: 'ডাউনলোড সম্পন্ন হয়েছে',
+            body: `${filename} ডিভাইসে সেভ করা হয়েছে।`,
+          },
+          trigger: null,
+        });
+      }
 
+      // ৪. গ্যালারিতে সেভ করা হচ্ছে
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status === 'granted') {
+          await MediaLibrary.createAssetAsync(uri);
+      }
+
+      // ৫. লোকাল স্টোরেজে ডেটা সংরক্ষণ
+      const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
+      let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
+
+      downloadList.unshift({ id: Date.now().toString(), videoId, title: videoData.title, thumbnail: videoData.thumbnail, quality: item.quality, type: downloadType, localUri: uri, date: new Date().toLocaleDateString() });
+      await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
+
+      setIsDownloading(false);
+      Alert.alert("সফল", "ডাউনলোড সফল এবং গ্যালারিতে সেভ হয়েছে!");
     } catch (error) {
-      Alert.alert("ত্রুটি", "সিস্টেম এরর।");
+      setIsDownloading(false);
+      Alert.alert("ত্রুটি", "নেটওয়ার্ক সমস্যার কারণে ডাউনলোড ব্যর্থ হয়েছে।");
       console.error("Download Error:", error);
     }
   };
@@ -146,7 +188,7 @@ export default function PlayerScreen({ route, navigation }) {
         setShowDownloadModal(false);
       }
     } catch (error) {
-      Alert.alert("সার্ভার এরর", "আপনার Termux সার্ভারটি সচল আছে কিনা যাচাই করুন।");
+      Alert.alert("সার্ভার এরর", "আপনার সার্ভারটি সচল আছে কিনা যাচাই করুন।");
       setShowDownloadModal(false);
     }
   };
@@ -226,7 +268,13 @@ export default function PlayerScreen({ route, navigation }) {
 
       <View style={styles.playerWrapper}></View>
 
-      {/* [UPDATE]: অ্যাপের ভেতরের কাস্টম প্রোগ্রেস বার (progressContainer) রিমুভ করা হয়েছে, কারণ এখন সিস্টেম নোটিফিকেশন বারে প্রোগ্রেস দেখাবে */}
+      {/* অ্যাপের ভেতরের প্রোগ্রেস বার (পূর্বের মতোই সংরক্ষিত) */}
+      {isDownloading && (
+        <View style={styles.progressContainer}>
+           <Text style={styles.progressText}>ডাউনলোড হচ্ছে... {Math.round(downloadProgress * 100)}%</Text>
+           <View style={styles.progressBarBg}><View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} /></View>
+        </View>
+      )}
 
       <FlatList 
         ListHeaderComponent={renderHeader}
@@ -282,6 +330,10 @@ const styles = StyleSheet.create({
     appHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, height: 50 },
     headerIconBtn: { padding: 10 },
     playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: 'transparent' },
+    progressContainer: { backgroundColor: '#1E1E1E', padding: 15, borderBottomWidth: 1, borderBottomColor: '#333' },
+    progressText: { color: '#00BFA5', fontSize: 14, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
+    progressBarBg: { height: 6, backgroundColor: '#333', borderRadius: 3, overflow: 'hidden' },
+    progressBarFill: { height: '100%', backgroundColor: '#00BFA5' },
     detailsContainer: { padding: 12 },
     titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
     titleTextContainer: { flex: 1, paddingRight: 15 },
