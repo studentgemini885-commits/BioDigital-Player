@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import * as FileSystem from 'expo-file-system'; 
+// [FIX]: Deprecated API এরর সমাধানের জন্য legacy পাথ ব্যবহার করা হলো
+import * as FileSystem from 'expo-file-system/legacy'; 
 import * as MediaLibrary from 'expo-media-library';
 
 const { width, height } = Dimensions.get('window');
@@ -65,14 +66,13 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {}
   };
 
-  // [UPDATED FIX]: নোটিফিকেশন রিমুভ করে গ্লোবাল ইভেন্ট এমিটার (Event Emitter) যুক্ত করা হয়েছে
   const handleDownloadExecute = async (item) => {
     try {
       setShowDownloadModal(false);
       setIsDownloading(true);
       setDownloadProgress(0);
 
-      const downloadId = Date.now().toString(); // ইউনিক আইডি
+      const downloadId = Date.now().toString(); 
       const safeTitle = (videoData.title || 'video').replace(/[^a-zA-Z0-9]/g, '_');
       const fileExt = downloadType === 'audio' ? 'mp3' : 'mp4';
       const fileUri = `${FileSystem.documentDirectory}${safeTitle}_${item.quality.replace(/[^0-9]/g, '')}p.${fileExt}`;
@@ -90,7 +90,6 @@ export default function PlayerScreen({ route, navigation }) {
             const percentage = Math.round(progress * 100);
             setDownloadProgress(progress); 
             
-            // ডাউনলোড স্ক্রিনে লাইভ ডেটা পাঠানোর সিগন্যাল
             DeviceEventEmitter.emit('live_download_progress', {
                 id: downloadId,
                 title: videoData.title,
@@ -104,7 +103,6 @@ export default function PlayerScreen({ route, navigation }) {
 
       const { uri } = await downloadResumable.downloadAsync();
 
-      // গ্যালারিতে সেভ করা হচ্ছে
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status === 'granted') {
           await MediaLibrary.createAssetAsync(uri);
@@ -117,12 +115,11 @@ export default function PlayerScreen({ route, navigation }) {
       await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
 
       setIsDownloading(false);
-      // ডাউনলোড শেষ হওয়ার সিগন্যাল
       DeviceEventEmitter.emit('live_download_complete', { id: downloadId });
       Alert.alert("সফল", "ডাউনলোড সফল এবং সেভ হয়েছে!");
     } catch (error) {
       setIsDownloading(false);
-      Alert.alert("ত্রুটি", "নেটওয়ার্ক সমস্যার কারণে ডাউনলোড ব্যর্থ হয়েছে।");
+      Alert.alert("ত্রুটি", "ডাউনলোড ব্যর্থ হয়েছে।");
       console.error("Download Error:", error);
     }
   };
