@@ -25,6 +25,9 @@ export default function PlayerScreen({ route, navigation }) {
   const [downloadType, setDownloadType] = useState('');
 
   const [isDownloading, setIsDownloading] = useState(false);
+  
+  // [FIX]: জিরো-লোডিং অডিও মোড কন্ট্রোল স্টেট
+  const [isAudioMode, setIsAudioMode] = useState(videoData?.type === 'audio');
 
   useFocusEffect(
     useCallback(() => {
@@ -33,7 +36,7 @@ export default function PlayerScreen({ route, navigation }) {
     }, [])
   );
 
-  // ব্যাকগ্রাউন্ড অডিও ইঞ্জিন কনফিগারেশন (স্ক্রিন অফ মোড)
+  // ব্যাকগ্রাউন্ড অডিও ইঞ্জিন কনফিগারেশন
   useEffect(() => {
     const enableBackgroundAudio = async () => {
       try {
@@ -77,16 +80,16 @@ export default function PlayerScreen({ route, navigation }) {
     } catch (e) {}
   };
 
-  // [NEW FIX]: ভিডিও বন্ধ করে শুধুমাত্র অডিও চালু রাখার লজিক
+  // [FIX]: কোনো বাফারিং বা লোডিং ছাড়াই অডিও-ভিডিও সুইচিং লজিক
   const handleBackgroundPlay = () => {
-    setIsDownloading(true);
-    setTimeout(() => setIsDownloading(false), 1000); // সাময়িক টোস্ট মেসেজ
-
-    // গ্লোবাল প্লেয়ারকে ভিডিও বন্ধ করে অডিও-অনলি মোডে যাওয়ার নির্দেশ
-    DeviceEventEmitter.emit('playAudioOnly', {
-        videoId: videoId,
-        videoData: { ...videoData, type: 'audio' }
-    });
+    const newMode = !isAudioMode;
+    setIsAudioMode(newMode);
+    
+    if (newMode) {
+        Alert.alert("অডিও মোড", "ভিডিও হাইড করা হয়েছে। স্ক্রিন বন্ধ করলেও এখন অডিও চলতে থাকবে।");
+    } else {
+        Alert.alert("ভিডিও মোড", "ভিডিও পুনরায় দৃশ্যমান করা হয়েছে।");
+    }
   };
 
   const handleDownloadExecute = async (item) => {
@@ -216,9 +219,9 @@ export default function PlayerScreen({ route, navigation }) {
          </TouchableOpacity>
          
          <View style={styles.actionRow}>
-            {/* ব্যাকগ্রাউন্ড অডিও প্লে বাটন */}
-            <TouchableOpacity style={styles.actionIconBtn} onPress={handleBackgroundPlay}>
-               <Ionicons name="headset-outline" size={24} color="#00BFA5" />
+            {/* ডাইনামিক অডিও টগল বাটন */}
+            <TouchableOpacity style={[styles.actionIconBtn, isAudioMode ? {backgroundColor: '#00BFA5'} : {}]} onPress={handleBackgroundPlay}>
+               <Ionicons name="headset-outline" size={24} color={isAudioMode ? "#000" : "#00BFA5"} />
             </TouchableOpacity>
 
             {!videoData.localUri && (
@@ -268,14 +271,15 @@ export default function PlayerScreen({ route, navigation }) {
       </View>
 
       <View style={styles.playerWrapper}>
-        {videoData?.type === 'audio' && (
+        {/* [FIX]: জিরো-ল্যাটেন্সি অডিও কভার (এটি ভিডিওর ওপর ভেসে ওঠে, কিন্তু স্ট্রিম কাটে না) */}
+        {isAudioMode && (
           <View style={styles.audioPosterContainer}>
             <Image source={{ uri: videoData.thumbnail }} style={styles.audioPosterBg} blurRadius={15} />
             <View style={styles.audioPosterOverlay}>
               <View style={styles.audioIconCircle}>
                 <Ionicons name="musical-notes" size={50} color="#FFF" />
               </View>
-              <Text style={styles.audioPosterText}>অডিও প্লে হচ্ছে</Text>
+              <Text style={styles.audioPosterText}>ব্যাকগ্রাউন্ড অডিও প্লে হচ্ছে</Text>
             </View>
           </View>
         )}
@@ -345,8 +349,8 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#0F0F0F' },
     appHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, height: 50 },
     headerIconBtn: { padding: 10 },
-    playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: '#000' },
-    audioPosterContainer: { flex: 1, width: '100%', height: '100%', position: 'relative', backgroundColor: '#111' },
+    playerWrapper: { width: '100%', height: PLAYER_HEIGHT, backgroundColor: 'transparent', position: 'relative' },
+    audioPosterContainer: { flex: 1, width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, backgroundColor: '#111' },
     audioPosterBg: { width: '100%', height: '100%', opacity: 0.5 },
     audioPosterOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
     audioIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0, 191, 165, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#00BFA5', marginBottom: 10 },
