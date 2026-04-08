@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-// [FIX]: Deprecated API এরর সমাধানের জন্য legacy পাথ ব্যবহার করা হলো
 import * as FileSystem from 'expo-file-system/legacy'; 
 import * as MediaLibrary from 'expo-media-library';
 
@@ -101,25 +100,46 @@ export default function PlayerScreen({ route, navigation }) {
         }
       );
 
-      const { uri } = await downloadResumable.downloadAsync();
+      // [FIXED]: Connection Reset এর জন্য Auto-Resume লজিক
+      let finalUri = null;
+      try {
+        const result = await downloadResumable.downloadAsync();
+        finalUri = result.uri;
+      } catch (dlError) {
+        console.log("Connection dropped. Attempting to resume...");
+        try {
+           // নেটওয়ার্ক ড্রপ হলে যেখান থেকে থেমেছে সেখান থেকে রিস্টার্ট করার চেষ্টা
+           const resumeResult = await downloadResumable.resumeAsync();
+           finalUri = resumeResult.uri;
+        } catch (resumeError) {
+           throw new Error("ডাউনলোড পুনরায় শুরু করা সম্ভব হয়নি।");
+        }
+      }
 
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status === 'granted') {
-          await MediaLibrary.createAssetAsync(uri);
+      if (!finalUri) throw new Error("File URI null");
+
+      // [FIXED]: গ্যালারিতে সেভ করার সময় পারমিশন রিজেক্ট হলে যেন ক্র্যাশ না করে তার জন্য Safe Try-Catch
+      try {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status === 'granted') {
+            await MediaLibrary.createAssetAsync(finalUri);
+        }
+      } catch (mediaError) {
+        console.log("Gallery save skipped due to permission policies in Expo Go.");
       }
 
       const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
       let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
 
-      downloadList.unshift({ id: downloadId, videoId, title: videoData.title, thumbnail: videoData.thumbnail, quality: item.quality, type: downloadType, localUri: uri, date: new Date().toLocaleDateString() });
+      downloadList.unshift({ id: downloadId, videoId, title: videoData.title, thumbnail: videoData.thumbnail, quality: item.quality, type: downloadType, localUri: finalUri, date: new Date().toLocaleDateString() });
       await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
 
       setIsDownloading(false);
       DeviceEventEmitter.emit('live_download_complete', { id: downloadId });
-      Alert.alert("সফল", "ডাউনলোড সফল এবং সেভ হয়েছে!");
+      Alert.alert("সফল", "ডাউনলোড সফলভাবে সম্পন্ন হয়েছে!");
     } catch (error) {
       setIsDownloading(false);
-      Alert.alert("ত্রুটি", "ডাউনলোড ব্যর্থ হয়েছে।");
+      Alert.alert("ত্রুটি", "নেটওয়ার্ক সমস্যার কারণে ডাউনলোড ব্যর্থ হয়েছে।");
       console.error("Download Error:", error);
     }
   };
