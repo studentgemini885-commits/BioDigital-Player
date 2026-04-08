@@ -22,7 +22,6 @@ export default function DownloadScreen({ navigation }) {
     if (isFocused) loadDownloads();
   }, [isFocused]);
 
-  // সার্ভার থেকে লাইভ প্রোগ্রেস পোলিং (Polling Engine)
   useEffect(() => {
     const interval = setInterval(async () => {
         try {
@@ -39,10 +38,9 @@ export default function DownloadScreen({ navigation }) {
                     if (active[item.id].status === 'completed') {
                         item.progress = 100;
                         item.isCompleted = true;
-                        // সার্ভার থেকে পাওয়া লোকাল প্লেব্যাক লিংক যুক্ত করা
                         item.localUri = active[item.id].localUrl;
                         needsSave = true;
-                        fetch(`${MY_API_SERVER}/api/clear-progress?id=${item.id}`); // মেমরি ক্লিন
+                        fetch(`${MY_API_SERVER}/api/clear-progress?id=${item.id}`); 
                     } else if (active[item.id].status === 'error') {
                         item.isError = true;
                         needsSave = true;
@@ -57,7 +55,7 @@ export default function DownloadScreen({ navigation }) {
             setDownloads(stored);
 
         } catch(e) {}
-    }, 1000); // প্রতি ১ সেকেন্ডে আপডেট
+    }, 1000); 
 
     return () => clearInterval(interval);
   }, []);
@@ -74,14 +72,19 @@ export default function DownloadScreen({ navigation }) {
     ]);
   };
 
+  // [FIX]: প্লেয়ার স্ক্রিনে ফাইলের type (অডিও/ভিডিও) পাঠানো হচ্ছে
   const handlePlayVideo = (item) => {
     if (!item.isCompleted) return;
     try {
       navigation.navigate('Player', {
         videoId: item.videoId,
         videoData: {
-          id: item.videoId, title: item.title, channel: 'Downloaded File', 
-          thumbnail: item.thumbnail, localUri: item.localUri // লোকাল সার্ভার থেকে প্লে হবে
+          id: item.videoId, 
+          title: item.title, 
+          channel: 'Downloaded File', 
+          thumbnail: item.thumbnail, 
+          localUri: item.localUri,
+          type: item.type // অডিও/ভিডিও ডিটেক্ট করার জন্য
         }
       });
     } catch (error) { console.error("Playback System Error:", error); }
