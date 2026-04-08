@@ -27,7 +27,7 @@ const getNumericQuality = (q) => {
 export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoRef = useRef(null);
-  const audioRef = useRef(null); // স্বাধীন অডিও ইঞ্জিন
+  const audioRef = useRef(null); 
   
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
@@ -37,9 +37,21 @@ export default function GlobalPlayer() {
   const [videoKey, setVideoKey] = useState(Date.now().toString()); 
   
   const [isAudioMode, setIsAudioMode] = useState(false);
-  const [isSwitching, setIsSwitching] = useState(false); // লোডিং স্টেট
+  const [isSwitching, setIsSwitching] = useState(false); 
   
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+
+  // [FIX]: ডাইনামিক ব্যাকগ্রাউন্ড পারমিশন কন্ট্রোলার (খাস বিধান)
+  const setBackgroundAudio = async (enable) => {
+    try {
+        await Audio.setAudioModeAsync({
+            staysActiveInBackground: enable,
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: true,
+            playThroughEarpieceAndroid: false,
+        });
+    } catch (e) { console.log(e); }
+  };
 
   const fetchStreamUrl = async (vidId, targetQuality) => {
     try {
@@ -60,15 +72,18 @@ export default function GlobalPlayer() {
 
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
-      // যদি আগে থেকে কোনো অডিও চলতে থাকে, তা ক্লিন করা
       if (audioRef.current) {
         await audioRef.current.unloadAsync();
         audioRef.current = null;
       }
 
+      // ভিডিও প্লে হওয়ার সময় চেক করবে এটি অডিও ফাইল কি না
+      const isAudio = data.videoData?.type === 'audio';
+      await setBackgroundAudio(isAudio); // অডিও হলে True, ভিডিও হলে False
+
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
-        setIsAudioMode(data.videoData?.type === 'audio');
+        setIsAudioMode(isAudio);
         return;
       }
       setVideoData(data.videoData);
@@ -76,7 +91,7 @@ export default function GlobalPlayer() {
       setStreamUrl(null);
       setErrorMsg(null);
       setIsPlaying(true);
-      setIsAudioMode(data.videoData?.type === 'audio');
+      setIsAudioMode(isAudio);
       pan.setValue({ x: 0, y: 0 });
 
       if (data.videoData && data.videoData.localUri) {
@@ -109,35 +124,35 @@ export default function GlobalPlayer() {
         if (videoData) setPlayerState('full');
     });
 
-    // [FIX]: True Audio Mode Switching Logic (টাইমস্ট্যাম্প সিংক)
+    // [FIX]: হেডসেট বাটনে চাপ দিলে পারমিশন পরিবর্তন হবে
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
         setIsSwitching(true);
         setIsAudioMode(mode);
+        
+        await setBackgroundAudio(mode); // মোড অনুযায়ী পারমিশন সেট
 
         try {
             if (mode) {
-                // ভিডিও থেকে অডিওতে যাওয়া
                 if (videoRef.current) {
                     const status = await videoRef.current.getStatusAsync();
-                    await videoRef.current.pauseAsync(); // ভিডিও ইঞ্জিন বন্ধ
+                    await videoRef.current.pauseAsync(); 
                     
                     const { sound } = await Audio.Sound.createAsync(
                         { uri: streamUrl },
-                        { shouldPlay: true, positionMillis: status.positionMillis } // ঠিক একই সেকেন্ড থেকে শুরু
+                        { shouldPlay: true, positionMillis: status.positionMillis } 
                     );
                     audioRef.current = sound;
                     setIsPlaying(true);
                 }
             } else {
-                // অডিও থেকে ভিডিওতে ফিরে আসা
                 if (audioRef.current) {
                     const status = await audioRef.current.getStatusAsync();
-                    await audioRef.current.unloadAsync(); // অডিও ইঞ্জিন সম্পূর্ণ ধ্বংস
+                    await audioRef.current.unloadAsync(); 
                     audioRef.current = null;
                     
                     if (videoRef.current) {
                         await videoRef.current.setPositionAsync(status.positionMillis);
-                        await videoRef.current.playAsync(); // ভিডিও ইঞ্জিন চালু
+                        await videoRef.current.playAsync(); 
                         setIsPlaying(true);
                     }
                 }
@@ -149,17 +164,26 @@ export default function GlobalPlayer() {
         setIsSwitching(false);
     });
 
+    const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
+      await setBackgroundAudio(false); // স্টপ করলে পারমিশন অফ
+      if (videoRef.current) await videoRef.current.pauseAsync();
+      if (audioRef.current) {
+          await audioRef.current.unloadAsync();
+          audioRef.current = null;
+      }
+      setPlayerState('hidden');
+      setStreamUrl(null);
+      setIsPlaying(false);
+    });
+
     return () => { 
-        playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove();
+        playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove(); stopSub.remove();
     };
   }, [videoData, streamUrl]);
 
-  // কম্পোনেন্ট ডিলিট হওয়ার সময় অডিও মেমরি ক্লিনআপ
   useEffect(() => {
     return () => {
-      if (audioRef.current) {
-        audioRef.current.unloadAsync();
-      }
+      if (audioRef.current) audioRef.current.unloadAsync();
     };
   }, []);
 
@@ -190,7 +214,6 @@ export default function GlobalPlayer() {
                {errorMsg ? (
                   <View style={styles.loadingBox}><Ionicons name="warning-outline" size={isFull ? 40 : 24} color="#FF4444" /></View>
                ) : streamUrl ? (
-                  // অডিও মোড অন থাকলে ভিডিও কম্পোনেন্ট রেন্ডারই হবে না, সম্পূর্ণ হাইড থাকবে
                   <View style={{ flex: 1, display: isAudioMode ? 'none' : 'flex' }}>
                     <Video 
                       key={videoKey} 
@@ -202,7 +225,6 @@ export default function GlobalPlayer() {
                   <View style={styles.loadingBox}><ActivityIndicator size={isFull ? "large" : "small"} color="#FF0000" /></View>
                )}
 
-               {/* সুইচ করার সময় ১ সেকেন্ডের বাফারিং স্পিনার */}
                {isSwitching && (
                   <View style={styles.switchingOverlay}>
                     <ActivityIndicator size="large" color="#00BFA5" />
@@ -237,6 +259,7 @@ export default function GlobalPlayer() {
                         <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
                      </TouchableOpacity>
                      <TouchableOpacity style={styles.miniCloseBtn} onPress={async () => {
+                         await setBackgroundAudio(false); // [FIX]: মিনি প্লেয়ার ক্লোজ করলে পারমিশন অফ
                          if (videoRef.current) await videoRef.current.pauseAsync();
                          if (audioRef.current) await audioRef.current.unloadAsync();
                          setPlayerState('hidden'); setVideoData(null); setStreamUrl(null); pan.setValue({ x:0, y:0 });
@@ -263,7 +286,6 @@ const styles = StyleSheet.create({
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.2)' },
   miniPlayBtn: { position: 'absolute', top: '50%', left: 10, marginTop: -13 },
   miniCloseBtn: { position: 'absolute', top: 4, right: 4, padding: 2 },
-  
   audioPosterContainer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10, backgroundColor: '#111' },
   audioPosterBg: { width: '100%', height: '100%', opacity: 0.5 },
   audioPosterOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
