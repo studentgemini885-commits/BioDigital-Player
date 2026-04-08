@@ -4,37 +4,12 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
 import { DeviceEventEmitter } from 'react-native';
-import * as MediaLibrary from 'expo-media-library';
+
+const MY_API_SERVER = "http://127.0.0.1:10000";
 
 export default function DownloadScreen({ navigation }) {
   const [downloads, setDownloads] = useState([]);
-  const [activeDownloads, setActiveDownloads] = useState({}); // লাইভ ডাউনলোডের স্টেট
   const isFocused = useIsFocused();
-
-  useEffect(() => {
-    if (isFocused) loadDownloads();
-  }, [isFocused]);
-
-  // [FIX]: প্লেয়ার স্ক্রিন থেকে পাঠানো লাইভ সিগন্যাল রিসিভ করা হচ্ছে
-  useEffect(() => {
-    const progressSub = DeviceEventEmitter.addListener('live_download_progress', (data) => {
-      setActiveDownloads(prev => ({ ...prev, [data.id]: data }));
-    });
-
-    const completeSub = DeviceEventEmitter.addListener('live_download_complete', (data) => {
-      setActiveDownloads(prev => {
-        const newState = { ...prev };
-        delete newState[data.id];
-        return newState;
-      });
-      loadDownloads(); // ডাউনলোড শেষ হলে মেইন লিস্ট আপডেট হবে
-    });
-
-    return () => {
-      progressSub.remove();
-      completeSub.remove();
-    };
-  }, []);
 
   const loadDownloads = async () => {
     try {
@@ -43,9 +18,53 @@ export default function DownloadScreen({ navigation }) {
     } catch (e) { console.error(e); }
   };
 
+  useEffect(() => {
+    if (isFocused) loadDownloads();
+  }, [isFocused]);
+
+  // সার্ভার থেকে লাইভ প্রোগ্রেস পোলিং (Polling Engine)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+        try {
+            const res = await fetch(`${MY_API_SERVER}/api/progress`);
+            const data = await res.json();
+            const active = data.activeDownloads || {};
+
+            let stored = await AsyncStorage.getItem('recorded_downloads');
+            stored = stored ? JSON.parse(stored) : [];
+            let needsSave = false;
+
+            stored = stored.map(item => {
+                if (active[item.id]) {
+                    if (active[item.id].status === 'completed') {
+                        item.progress = 100;
+                        item.isCompleted = true;
+                        // সার্ভার থেকে পাওয়া লোকাল প্লেব্যাক লিংক যুক্ত করা
+                        item.localUri = active[item.id].localUrl;
+                        needsSave = true;
+                        fetch(`${MY_API_SERVER}/api/clear-progress?id=${item.id}`); // মেমরি ক্লিন
+                    } else if (active[item.id].status === 'error') {
+                        item.isError = true;
+                        needsSave = true;
+                    } else {
+                        item.progress = active[item.id].progress;
+                    }
+                }
+                return item;
+            });
+
+            if (needsSave) await AsyncStorage.setItem('recorded_downloads', JSON.stringify(stored));
+            setDownloads(stored);
+
+        } catch(e) {}
+    }, 1000); // প্রতি ১ সেকেন্ডে আপডেট
+
+    return () => clearInterval(interval);
+  }, []);
+
   const deleteDownload = async (id) => {
     Alert.alert("মুছে ফেলুন", "আপনি কি এই ডাউনলোডের রেকর্ডটি মুছে ফেলতে চান?", [
-      { text: "না" },
+      { text: "না", style: "cancel" },
       { text: "হ্যাঁ", onPress: async () => {
           const newList = downloads.filter(item => item.id !== id);
           setDownloads(newList);
@@ -55,39 +74,30 @@ export default function DownloadScreen({ navigation }) {
     ]);
   };
 
-  // [FIX]: ভিডিও প্লে করার আগে পারমিশন চেক করা হচ্ছে
-  const handlePlayVideo = async (item) => {
+  const handlePlayVideo = (item) => {
+    if (!item.isCompleted) return;
     try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert("পারমিশন প্রয়োজন", "এই লোকাল ভিডিওটি প্লে করার জন্য আপনার স্টোরেজ পারমিশন প্রয়োজন।");
-        return;
-      }
-      
       navigation.navigate('Player', {
         videoId: item.videoId,
         videoData: {
-          id: item.videoId,
-          title: item.title,
-          channel: 'Downloaded File',
-          thumbnail: item.thumbnail,
-          localUri: item.localUri || item.url
+          id: item.videoId, title: item.title, channel: 'Downloaded File', 
+          thumbnail: item.thumbnail, localUri: item.localUri // লোকাল সার্ভার থেকে প্লে হবে
         }
       });
-    } catch (error) {
-      console.error("Playback error:", error);
-    }
+    } catch (error) { console.error("Playback System Error:", error); }
   };
 
-  // লাইভ ডাউনলোডের UI রেন্ডার
+  const activeDownloads = downloads.filter(d => !d.isCompleted && !d.isError);
+  const completedDownloads = downloads.filter(d => d.isCompleted);
+
   const renderActiveItem = ({ item }) => (
     <View style={styles.activeCard}>
       <Image source={{ uri: item.thumbnail }} style={styles.thumb} />
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.meta}>ডাউনলোড হচ্ছে... {item.progress}%</Text>
+        <Text style={styles.meta}>ডাউনলোড হচ্ছে... {item.progress || 0}%</Text>
         <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${item.progress}%` }]} />
+          <View style={[styles.progressBarFill, { width: `${item.progress || 0}%` }]} />
         </View>
       </View>
     </View>
@@ -108,8 +118,6 @@ export default function DownloadScreen({ navigation }) {
     </View>
   );
 
-  const activeList = Object.values(activeDownloads);
-
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="#0F0F0F" barStyle="light-content" />
@@ -121,21 +129,21 @@ export default function DownloadScreen({ navigation }) {
       </View>
 
       <FlatList 
-        data={downloads}
+        data={completedDownloads}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
-          activeList.length > 0 ? (
+          activeDownloads.length > 0 ? (
             <View style={{ marginBottom: 15 }}>
-              <Text style={styles.sectionTitle}>চলমান ডাউনলোড ({activeList.length})</Text>
-              {activeList.map(item => <React.Fragment key={item.id}>{renderActiveItem({ item })}</React.Fragment>)}
+              <Text style={styles.sectionTitle}>চলমান ডাউনলোড ({activeDownloads.length})</Text>
+              {activeDownloads.map(item => <React.Fragment key={item.id}>{renderActiveItem({ item })}</React.Fragment>)}
               <View style={styles.divider} />
             </View>
           ) : null
         }
         ListEmptyComponent={
-          activeList.length === 0 && (
+          activeDownloads.length === 0 && completedDownloads.length === 0 && (
             <View style={styles.empty}>
               <Ionicons name="download-outline" size={80} color="#333" />
               <Text style={styles.emptyText}>কোনো ডাউনলোড পাওয়া যায়নি</Text>
