@@ -6,14 +6,13 @@ import { DeviceEventEmitter } from 'react-native';
 
 export default function SettingsScreen() {
   const [isMainQualityExpanded, setIsMainQualityExpanded] = useState(false);
-  const [selectedMainQuality, setSelectedMainQuality] = useState('Auto'); // ডিফল্ট
+  const [selectedMainQuality, setSelectedMainQuality] = useState('Auto');
 
   const [isShortQualityExpanded, setIsShortQualityExpanded] = useState(false);
-  const [selectedShortQuality, setSelectedShortQuality] = useState('Normal Video Quality'); // ডিফল্ট
+  const [selectedShortQuality, setSelectedShortQuality] = useState('Normal Video Quality');
 
   const [isLoading, setIsLoading] = useState(false);
 
-  // লং ভিডিওর জন্য স্পেসিফিক কোয়ালিটি অপশন
   const longVideoOptions = [
       'Auto',
       '75p',
@@ -28,7 +27,6 @@ export default function SettingsScreen() {
       '4320p (8K)'
   ];
 
-  // শর্টস ভিডিওর জন্য অপশনগুলো
   const shortVideoOptions = [
       'Anti Data Saver Mode', 
       'Low Video Quality', 
@@ -36,7 +34,6 @@ export default function SettingsScreen() {
       'High Video Quality 4k-8k'
   ];
 
-  // [FIX]: অ্যাপ চালু হলে লোকাল স্টোরেজ থেকে পূর্বের সেভ করা সেটিং লোড করা
   useEffect(() => {
     const loadSettings = async () => {
       try {
@@ -53,7 +50,6 @@ export default function SettingsScreen() {
     loadSettings();
   }, []);
 
-  // [FIX]: AsyncStorage এ সেভ করা এবং গ্লোবাল প্লেয়ারকে রিয়েল-টাইম সিগন্যাল পাঠানো
   const handleMainQualitySelect = async (res) => {
     setIsLoading(true); 
     try {
@@ -65,7 +61,7 @@ export default function SettingsScreen() {
       
       setSelectedMainQuality(res);
       
-      // গ্লোবাল প্লেয়ারকে কোয়ালিটি পরিবর্তনের নির্দেশ দেওয়া
+      // গ্লোবাল প্লেয়ারকে রিয়েল-টাইমে রিস্টার্ট হওয়ার সিগন্যাল পাঠানো
       DeviceEventEmitter.emit('qualityChanged', res);
     } catch (error) {
       console.error("Settings Save Error:", error);
@@ -117,7 +113,6 @@ export default function SettingsScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.listSection}>
 
-          {/* লং ভিডিও কোয়ালিটি */}
           <ExpandableMenu 
             icon="tv-outline" label="Long Video Quality" 
             expanded={isMainQualityExpanded} onPress={() => setIsMainQualityExpanded(!isMainQualityExpanded)} 
@@ -132,7 +127,6 @@ export default function SettingsScreen() {
             </View>
           )}
 
-          {/* শর্টস ভিডিও কোয়ালিটি */}
           <ExpandableMenu 
             icon="phone-portrait-outline" label="Shorts Video Quality" 
             expanded={isShortQualityExpanded} onPress={() => setIsShortQualityExpanded(!isShortQualityExpanded)} 
