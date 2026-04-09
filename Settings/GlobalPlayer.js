@@ -177,27 +177,33 @@ export default function GlobalPlayer() {
 
         try {
             if (mode) {
+                // ভিডিও থেকে অডিও মোডে যাওয়া
                 let currentPos = 0;
                 if (videoRef.current) {
                     const status = await videoRef.current.getStatusAsync();
                     currentPos = status.positionMillis || 0;
-                    await videoRef.current.pauseAsync(); 
+                    await videoRef.current.pauseAsync(); // মূল ভিডিও বন্ধ
                 }
                 if (syncAudioRef.current) {
-                    await syncAudioRef.current.pauseAsync();
+                    await syncAudioRef.current.pauseAsync(); // ব্যাকগ্রাউন্ড সিঙ্ক অডিও বন্ধ
                 }
                 
                 const targetAudioUrl = audioStreamUrlRef.current || streamUrlRef.current;
                 
-                // [FIX]: Direct Position Injection - অডিও লোড হওয়ার সময়ই সঠিক মিলি-সেকেন্ডে প্লে শুরু হবে
+                // অডিও লোড এবং সিকিং বাগ ফিক্স
                 const { sound } = await Audio.Sound.createAsync(
                     { uri: targetAudioUrl },
-                    { shouldPlay: true, positionMillis: currentPos, volume: 1.0, isMuted: false } 
+                    { shouldPlay: false, volume: 1.0, isMuted: false } 
                 );
                 audioRef.current = sound;
+                
+                await audioRef.current.playAsync();
+                await audioRef.current.setPositionAsync(currentPos);
+                
                 setIsPlaying(true);
 
             } else {
+                // অডিও থেকে ভিডিও মোডে ফিরে আসা
                 let currentPos = 0;
                 if (audioRef.current) {
                     const status = await audioRef.current.getStatusAsync();
