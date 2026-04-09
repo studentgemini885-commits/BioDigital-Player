@@ -1,18 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DeviceEventEmitter } from 'react-native';
+import { DeviceEventEmitter } from 'react-native'; // [NEW]: ভাসমান প্লেয়ারে সিগন্যাল পাঠানোর জন্য
+
+// গ্লোবাল মেমরি ডিক্লেয়ারেশন
+global.appSettings = global.appSettings || {};
+global.appSettings.normalVideo = global.appSettings.normalVideo || 'Auto'; 
+global.shortVideoQuality = global.shortVideoQuality || 'Normal Video Quality';
 
 export default function SettingsScreen() {
   const [isMainQualityExpanded, setIsMainQualityExpanded] = useState(false);
-  const [selectedMainQuality, setSelectedMainQuality] = useState('Auto');
+  const [selectedMainQuality, setSelectedMainQuality] = useState(global.appSettings.normalVideo);
 
   const [isShortQualityExpanded, setIsShortQualityExpanded] = useState(false);
-  const [selectedShortQuality, setSelectedShortQuality] = useState('Normal Video Quality');
+  const [selectedShortQuality, setSelectedShortQuality] = useState(global.shortVideoQuality);
 
   const [isLoading, setIsLoading] = useState(false);
 
+  // লং ভিডিওর জন্য স্পেসিফিক কোয়ালিটি অপশন
   const longVideoOptions = [
       'Auto',
       '75p',
@@ -27,6 +32,7 @@ export default function SettingsScreen() {
       '4320p (8K)'
   ];
 
+  // শর্টস ভিডিওর জন্য অপশন
   const shortVideoOptions = [
       'Anti Data Saver Mode', 
       'Low Video Quality', 
@@ -34,59 +40,24 @@ export default function SettingsScreen() {
       'High Video Quality 4k-8k'
   ];
 
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const savedSettings = await AsyncStorage.getItem('appSettings');
-        if (savedSettings) {
-          const parsed = JSON.parse(savedSettings);
-          if (parsed.normalVideo) setSelectedMainQuality(parsed.normalVideo);
-          if (parsed.shortVideoQuality) setSelectedShortQuality(parsed.shortVideoQuality);
-        }
-      } catch (e) {
-        console.error("Settings Load Error:", e);
-      }
-    };
-    loadSettings();
-  }, []);
-
-  const handleMainQualitySelect = async (res) => {
+  const handleMainQualitySelect = (res) => {
     setIsLoading(true); 
-    try {
-      const savedSettings = await AsyncStorage.getItem('appSettings');
-      const parsed = savedSettings ? JSON.parse(savedSettings) : {};
-      
-      parsed.normalVideo = res;
-      await AsyncStorage.setItem('appSettings', JSON.stringify(parsed));
-      
+    setTimeout(() => {
+      global.appSettings.normalVideo = res; 
       setSelectedMainQuality(res);
       
-      // গ্লোবাল প্লেয়ারকে রিয়েল-টাইমে রিস্টার্ট হওয়ার সিগন্যাল পাঠানো
+      // [NEW]: গ্লোবাল প্লেয়ারকে তৎক্ষণাৎ রিস্টার্ট হওয়ার নির্দেশ দেওয়া
       DeviceEventEmitter.emit('qualityChanged', res);
-    } catch (error) {
-      console.error("Settings Save Error:", error);
-    }
-
-    setTimeout(() => {
+      
       setIsLoading(false); 
     }, 800);
   };
 
-  const handleShortQualitySelect = async (res) => {
+  const handleShortQualitySelect = (res) => {
     setIsLoading(true); 
-    try {
-      const savedSettings = await AsyncStorage.getItem('appSettings');
-      const parsed = savedSettings ? JSON.parse(savedSettings) : {};
-      
-      parsed.shortVideoQuality = res;
-      await AsyncStorage.setItem('appSettings', JSON.stringify(parsed));
-      
-      setSelectedShortQuality(res);
-    } catch (error) {
-      console.error("Settings Save Error:", error);
-    }
-
     setTimeout(() => {
+      global.shortVideoQuality = res; 
+      setSelectedShortQuality(res);
       setIsLoading(false); 
     }, 800);
   };
