@@ -30,7 +30,7 @@ export default function GlobalPlayer() {
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
-  const [audioStreamUrl, setAudioStreamUrl] = useState(null); // [FIX]: অডিও লিংক মেমরিতে সেভ রাখার স্টেট
+  const [audioStreamUrl, setAudioStreamUrl] = useState(null); 
   const [streamMode, setStreamMode] = useState('combined'); 
 
   const [isPlaying, setIsPlaying] = useState(true);
@@ -63,7 +63,7 @@ export default function GlobalPlayer() {
       if (json.success && json.url) {
           setStreamMode(json.streamType || 'combined');
           setStreamUrl(json.url);
-          setAudioStreamUrl(json.audioUrl || json.url); // [FIX]: অডিও লিংক সেভ করা হলো
+          setAudioStreamUrl(json.audioUrl || json.url); 
 
           if (json.streamType === 'separate' && json.audioUrl) {
               try {
@@ -103,23 +103,29 @@ export default function GlobalPlayer() {
 
   useEffect(() => {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
+      const isAudio = data.videoData?.type === 'audio';
+
+      // [FIX]: আগের ভিডিও হলে অডিও আনলোড না করে শুধুমাত্র প্লেয়ারকে ম্যাক্সিমাইজ করা হবে
+      if (videoData?.id === data.videoId) {
+        setPlayerState('full');
+        setIsAudioMode(isAudio);
+        await setBackgroundAudio(isAudio);
+        return; // এখানেই রিটার্ন, ফলে নিচে থাকা অডিও আনলোড কোড কাজ করবে না
+      }
+
+      // যদি নতুন ভিডিও হয়, তাহলে আগের অডিওগুলো আনলোড করে দেওয়া হবে
       if (audioRef.current) {
         await audioRef.current.unloadAsync();
         audioRef.current = null;
       }
-      if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
+      if (syncAudioRef.current) {
+        await syncAudioRef.current.unloadAsync();
+      }
 
-      const isAudio = data.videoData?.type === 'audio';
       await setBackgroundAudio(isAudio); 
 
       currentVideoIdRef.current = data.videoId;
       isLocalRef.current = !!(data.videoData && data.videoData.localUri);
-
-      if (videoData?.id === data.videoId) {
-        setPlayerState('full');
-        setIsAudioMode(isAudio);
-        return;
-      }
 
       setVideoData(data.videoData);
       setPlayerState('full');
@@ -164,7 +170,6 @@ export default function GlobalPlayer() {
 
         try {
             if (mode) {
-                // [FIX]: অডিও মোডে গেলে মূল ভিডিও এবং সিঙ্ক অডিও—দুটোই পজ হবে
                 let currentPos = 0;
                 if (videoRef.current) {
                     const status = await videoRef.current.getStatusAsync();
@@ -175,21 +180,18 @@ export default function GlobalPlayer() {
                     await syncAudioRef.current.pauseAsync();
                 }
 
-                // [FIX]: মেমরি থেকে সরাসরি অডিও লিংক নিয়ে লোড করা এবং জোরপূর্বক সঠিক সময়ে টেনে নেওয়া
                 const targetAudioUrl = audioStreamUrl || streamUrl;
                 const { sound } = await Audio.Sound.createAsync(
                     { uri: targetAudioUrl },
-                    { shouldPlay: false } // প্রথমে পজ অবস্থায় লোড হবে
+                    { shouldPlay: false } 
                 );
                 audioRef.current = sound;
 
-                // বাফার হওয়ার পর পজিশন সেট করে তারপর প্লে করা হবে
                 await audioRef.current.setPositionAsync(currentPos);
                 await audioRef.current.playAsync();
                 setIsPlaying(true);
 
             } else {
-                // [FIX]: অডিও মোড থেকে ভিডিওতে ফিরে আসা
                 let currentPos = 0;
                 if (audioRef.current) {
                     const status = await audioRef.current.getStatusAsync();
@@ -198,7 +200,6 @@ export default function GlobalPlayer() {
                     audioRef.current = null;
                 }
 
-                // [সমাধান]: অডিও ইঞ্জিনকে আনলোড হওয়ার পর রিসেট হওয়ার জন্য সামান্য সময় দেওয়া (২০০ms delay)
                 setTimeout(async () => {
                     try {
                         if (videoRef.current) {
@@ -239,7 +240,7 @@ export default function GlobalPlayer() {
     return () => { 
         playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove(); stopSub.remove();
     };
-  }, [videoData, streamUrl, audioStreamUrl]); // [FIX]: ডিপেন্ডেন্সি আপডেট করা হয়েছে
+  }, [videoData, streamUrl, audioStreamUrl]); 
 
   useEffect(() => {
     return () => {
