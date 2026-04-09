@@ -29,6 +29,10 @@ export default function GlobalPlayer() {
   const videoRef = useRef(null);
   const audioRef = useRef(null); 
   
+  // [FIX]: Stale Closure এড়ানোর জন্য রেফারেন্স ব্যবহার
+  const currentVideoIdRef = useRef(null);
+  const isLocalRef = useRef(false);
+  
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
@@ -41,7 +45,6 @@ export default function GlobalPlayer() {
   
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
-  // [FIX]: ডাইনামিক ব্যাকগ্রাউন্ড পারমিশন কন্ট্রোলার (খাস বিধান)
   const setBackgroundAudio = async (enable) => {
     try {
         await Audio.setAudioModeAsync({
@@ -77,15 +80,19 @@ export default function GlobalPlayer() {
         audioRef.current = null;
       }
 
-      // ভিডিও প্লে হওয়ার সময় চেক করবে এটি অডিও ফাইল কি না
       const isAudio = data.videoData?.type === 'audio';
-      await setBackgroundAudio(isAudio); // অডিও হলে True, ভিডিও হলে False
+      await setBackgroundAudio(isAudio); 
+
+      // রেফারেন্স মেমরিতে সেভ করা
+      currentVideoIdRef.current = data.videoId;
+      isLocalRef.current = !!(data.videoData && data.videoData.localUri);
 
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
         setIsAudioMode(isAudio);
         return;
       }
+      
       setVideoData(data.videoData);
       setPlayerState('full');
       setStreamUrl(null);
@@ -94,7 +101,7 @@ export default function GlobalPlayer() {
       setIsAudioMode(isAudio);
       pan.setValue({ x: 0, y: 0 });
 
-      if (data.videoData && data.videoData.localUri) {
+      if (isLocalRef.current) {
           setStreamUrl(data.videoData.localUri);
           return;
       }
@@ -111,11 +118,12 @@ export default function GlobalPlayer() {
       await fetchStreamUrl(data.videoId, targetQuality);
     });
 
+    // [FIX]: কোয়ালিটি পরিবর্তনের সময় সঠিকভাবে রেফারেন্স ব্যবহার করা
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
-      if (videoData && !videoData.localUri) { 
+      if (currentVideoIdRef.current && !isLocalRef.current) { 
         setStreamUrl(null); 
         setVideoKey(Date.now().toString()); 
-        await fetchStreamUrl(videoData.id, newQuality);
+        await fetchStreamUrl(currentVideoIdRef.current, newQuality);
       }
     });
 
@@ -124,12 +132,11 @@ export default function GlobalPlayer() {
         if (videoData) setPlayerState('full');
     });
 
-    // [FIX]: হেডসেট বাটনে চাপ দিলে পারমিশন পরিবর্তন হবে
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', async (mode) => {
         setIsSwitching(true);
         setIsAudioMode(mode);
         
-        await setBackgroundAudio(mode); // মোড অনুযায়ী পারমিশন সেট
+        await setBackgroundAudio(mode); 
 
         try {
             if (mode) {
@@ -137,8 +144,18 @@ export default function GlobalPlayer() {
                     const status = await videoRef.current.getStatusAsync();
                     await videoRef.current.pauseAsync(); 
                     
+                    // সার্ভার থেকে পাওয়া স্পেশাল অডিও লিংক ব্যবহার করা
+                    let audioOnlyUrl = streamUrl;
+                    if (!isLocalRef.current) {
+                        const targetUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}`;
+                        const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&action=play`;
+                        const response = await fetch(apiUrl);
+                        const data = await response.json();
+                        audioOnlyUrl = data.audioUrl || streamUrl; 
+                    }
+
                     const { sound } = await Audio.Sound.createAsync(
-                        { uri: streamUrl },
+                        { uri: audioOnlyUrl },
                         { shouldPlay: true, positionMillis: status.positionMillis } 
                     );
                     audioRef.current = sound;
@@ -165,7 +182,7 @@ export default function GlobalPlayer() {
     });
 
     const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
-      await setBackgroundAudio(false); // স্টপ করলে পারমিশন অফ
+      await setBackgroundAudio(false); 
       if (videoRef.current) await videoRef.current.pauseAsync();
       if (audioRef.current) {
           await audioRef.current.unloadAsync();
@@ -179,7 +196,7 @@ export default function GlobalPlayer() {
     return () => { 
         playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove(); stopSub.remove();
     };
-  }, [videoData, streamUrl]);
+  }, [videoData]); // Dependencies Updated
 
   useEffect(() => {
     return () => {
@@ -259,7 +276,7 @@ export default function GlobalPlayer() {
                         <Ionicons name={isPlaying ? "pause" : "play"} size={26} color="#FFF" />
                      </TouchableOpacity>
                      <TouchableOpacity style={styles.miniCloseBtn} onPress={async () => {
-                         await setBackgroundAudio(false); // [FIX]: মিনি প্লেয়ার ক্লোজ করলে পারমিশন অফ
+                         await setBackgroundAudio(false); 
                          if (videoRef.current) await videoRef.current.pauseAsync();
                          if (audioRef.current) await audioRef.current.unloadAsync();
                          setPlayerState('hidden'); setVideoData(null); setStreamUrl(null); pan.setValue({ x:0, y:0 });
