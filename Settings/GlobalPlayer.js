@@ -24,7 +24,6 @@ export default function GlobalPlayer() {
   const audioRef = useRef(null); 
   const syncAudioRef = useRef(new Audio.Sound()); 
   
-  // [FIX]: Stale Closure এড়ানোর জন্য URL গুলোকে সরাসরি Memory Reference-এ রাখা হলো
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
   const streamUrlRef = useRef(null);
@@ -72,7 +71,7 @@ export default function GlobalPlayer() {
           
           setStreamUrl(json.url);
           streamUrlRef.current = json.url;
-          audioStreamUrlRef.current = fetchedAudioUrl; // নিখুঁত অডিও লিংক মেমরিতে সেভ
+          audioStreamUrlRef.current = fetchedAudioUrl; 
           
           if (fetchedStreamMode === 'separate' && fetchedAudioUrl) {
               try {
@@ -188,18 +187,14 @@ export default function GlobalPlayer() {
                     await syncAudioRef.current.pauseAsync();
                 }
                 
-                // [FIX]: মেমরি রেফারেন্স থেকে পিওর অডিও লিংক নেওয়া হচ্ছে (শব্দহীন ভিডিওর ফাঁদ থেকে মুক্তি)
                 const targetAudioUrl = audioStreamUrlRef.current || streamUrlRef.current;
                 
+                // [FIX]: Direct Position Injection - অডিও লোড হওয়ার সময়ই সঠিক মিলি-সেকেন্ডে প্লে শুরু হবে
                 const { sound } = await Audio.Sound.createAsync(
                     { uri: targetAudioUrl },
-                    // [FIX]: ভলিউম ১০০% নিশ্চিত করা
-                    { shouldPlay: false, volume: 1.0, isMuted: false } 
+                    { shouldPlay: true, positionMillis: currentPos, volume: 1.0, isMuted: false } 
                 );
                 audioRef.current = sound;
-                
-                await audioRef.current.setPositionAsync(currentPos);
-                await audioRef.current.playAsync();
                 setIsPlaying(true);
 
             } else {
