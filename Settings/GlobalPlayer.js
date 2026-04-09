@@ -12,16 +12,11 @@ const MINI_WIDTH = width * 0.45;
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
+// [FIX]: যেকোনো স্ট্রিং থেকে নিখুঁতভাবে রেজোলিউশন নম্বর বের করার জন্য Regex ব্যবহার
 const getNumericQuality = (q) => {
-    if (!q) return '720';
-    const s = String(q).toLowerCase();
-    if (s.includes('144')) return '144';
-    if (s.includes('240')) return '240';
-    if (s.includes('360')) return '360';
-    if (s.includes('480')) return '480';
-    if (s.includes('720')) return '720';
-    if (s.includes('1080')) return '1080';
-    return '720';
+    if (!q || String(q).toLowerCase() === 'auto') return '720';
+    const match = String(q).match(/\d+/);
+    return match ? match[0] : '720';
 };
 
 export default function GlobalPlayer() {
@@ -29,7 +24,6 @@ export default function GlobalPlayer() {
   const videoRef = useRef(null);
   const audioRef = useRef(null); 
   
-  // [FIX]: Stale Closure এড়ানোর জন্য রেফারেন্স ব্যবহার
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
   
@@ -64,6 +58,7 @@ export default function GlobalPlayer() {
       const json = await res.json();
       if (json.success && json.url) {
           setStreamUrl(json.url);
+          setIsPlaying(true); // নতুন লিংক আসার পর প্লে শুরু
           setErrorMsg(null);
       } else {
           setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
@@ -83,7 +78,6 @@ export default function GlobalPlayer() {
       const isAudio = data.videoData?.type === 'audio';
       await setBackgroundAudio(isAudio); 
 
-      // রেফারেন্স মেমরিতে সেভ করা
       currentVideoIdRef.current = data.videoId;
       isLocalRef.current = !!(data.videoData && data.videoData.localUri);
 
@@ -118,11 +112,14 @@ export default function GlobalPlayer() {
       await fetchStreamUrl(data.videoId, targetQuality);
     });
 
-    // [FIX]: কোয়ালিটি পরিবর্তনের সময় সঠিকভাবে রেফারেন্স ব্যবহার করা
+    // [FIX]: কোয়ালিটি পরিবর্তনের সিগন্যাল রিসিভ করা এবং ফোর্স রিস্টার্ট করা
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
       if (currentVideoIdRef.current && !isLocalRef.current) { 
-        setStreamUrl(null); 
-        setVideoKey(Date.now().toString()); 
+        setIsPlaying(false); // চলতি ভিডিও থামানো
+        setStreamUrl(null);  // লোডিং স্পিনার শো করানো
+        setErrorMsg(null);
+        setVideoKey(Date.now().toString()); // কম্পোনেন্ট ফোর্স রিমুন্ট (Cache Clear)
+        
         await fetchStreamUrl(currentVideoIdRef.current, newQuality);
       }
     });
@@ -144,7 +141,6 @@ export default function GlobalPlayer() {
                     const status = await videoRef.current.getStatusAsync();
                     await videoRef.current.pauseAsync(); 
                     
-                    // সার্ভার থেকে পাওয়া স্পেশাল অডিও লিংক ব্যবহার করা
                     let audioOnlyUrl = streamUrl;
                     if (!isLocalRef.current) {
                         const targetUrl = `https://www.youtube.com/watch?v=${currentVideoIdRef.current}`;
@@ -196,7 +192,7 @@ export default function GlobalPlayer() {
     return () => { 
         playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove(); stopSub.remove();
     };
-  }, [videoData]); // Dependencies Updated
+  }, [videoData]);
 
   useEffect(() => {
     return () => {
