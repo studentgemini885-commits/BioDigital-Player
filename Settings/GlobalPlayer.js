@@ -12,6 +12,9 @@ const MINI_WIDTH = width * 0.45;
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
 
+// [NEW]: কোয়ালিটি ডাউনগ্রেড করার জন্য একটি সিরিয়াল লিস্ট
+const QUALITY_FALLBACK_ORDER = ['4320', '2160', '1440', '1080', '720', '480', '360', '240', '144'];
+
 const getNumericQuality = (q) => {
     if (!q || String(q).toLowerCase() === 'auto') return '720';
     const match = String(q).match(/\d+/);
@@ -54,34 +57,45 @@ export default function GlobalPlayer() {
   };
 
   const fetchStreamUrl = async (vidId, targetQuality) => {
-    try {
-      const numQ = getNumericQuality(targetQuality);
-      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${numQ}&merge=true&t=${Date.now()}`;
-      const res = await fetch(apiUrl);
-      const json = await res.json();
+    const requestedQ = getNumericQuality(targetQuality);
+    let startIndex = QUALITY_FALLBACK_ORDER.indexOf(requestedQ);
+    if (startIndex === -1) startIndex = 4; // ডিফল্ট 720p যদি লিস্টে না থাকে
 
-      if (json.success && json.url) {
-          setStreamMode(json.streamType || 'combined');
-          setStreamUrl(json.url);
-          setAudioStreamUrl(json.audioUrl || json.url); 
+    setErrorMsg(null);
 
-          if (json.streamType === 'separate' && json.audioUrl) {
-              try {
-                  await syncAudioRef.current.unloadAsync();
-                  await syncAudioRef.current.loadAsync({ uri: json.audioUrl });
-              } catch(e) { console.log(e); }
-          } else {
-              await syncAudioRef.current.unloadAsync();
-          }
+    // [FIX]: যদি নির্দিষ্ট কোয়ালিটি না পায় তবে অটোমেটিক নিচের কোয়ালিটি চেক করবে
+    for (let i = startIndex; i < QUALITY_FALLBACK_ORDER.length; i++) {
+        let attemptQ = QUALITY_FALLBACK_ORDER[i];
+        try {
+            const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${attemptQ}&merge=true&t=${Date.now()}`;
+            const res = await fetch(apiUrl);
+            const json = await res.json();
 
-          setIsPlaying(true);
-          setErrorMsg(null);
-      } else {
-          setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
-      }
-    } catch(e) { 
-      setErrorMsg("সার্ভার কানেকশন এরর!");
+            if (json.success && json.url) {
+                setStreamMode(json.streamType || 'combined');
+                setStreamUrl(json.url);
+                setAudioStreamUrl(json.audioUrl || json.url); 
+
+                if (json.streamType === 'separate' && json.audioUrl) {
+                    try {
+                        await syncAudioRef.current.unloadAsync();
+                        await syncAudioRef.current.loadAsync({ uri: json.audioUrl });
+                    } catch(e) { console.log(e); }
+                } else {
+                    await syncAudioRef.current.unloadAsync();
+                }
+
+                setIsPlaying(true);
+                setErrorMsg(null);
+                return; // সফলভাবে লিংক পেলে ফাংশন এখানেই শেষ হবে
+            }
+        } catch(e) { 
+            console.log(`Failed to fetch ${attemptQ}p`, e);
+        }
     }
+
+    // যদি কোনো কোয়ালিটিতেই ভিডিও না পাওয়া যায়
+    setErrorMsg("কোনো কোয়ালিটিতেই ভিডিও লিংক পাওয়া যায়নি!");
   };
 
   const handlePlaybackStatusUpdate = async (status) => {
@@ -105,15 +119,13 @@ export default function GlobalPlayer() {
     const playSub = DeviceEventEmitter.addListener('playVideo', async (data) => {
       const isAudio = data.videoData?.type === 'audio';
 
-      // [FIX]: আগের ভিডিও হলে অডিও আনলোড না করে শুধুমাত্র প্লেয়ারকে ম্যাক্সিমাইজ করা হবে
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
         setIsAudioMode(isAudio);
         await setBackgroundAudio(isAudio);
-        return; // এখানেই রিটার্ন, ফলে নিচে থাকা অডিও আনলোড কোড কাজ করবে না
+        return; 
       }
 
-      // যদি নতুন ভিডিও হয়, তাহলে আগের অডিওগুলো আনলোড করে দেওয়া হবে
       if (audioRef.current) {
         await audioRef.current.unloadAsync();
         audioRef.current = null;
@@ -180,7 +192,21 @@ export default function GlobalPlayer() {
                     await syncAudioRef.current.pauseAsync();
                 }
 
-                const targetAudioUrl = audioStreamUrl || streamUrl;
+                let targetAudioUrl = audioStreamUrl || streamUrl;
+
+                // [UPDATE]: ৭৫p থেকে ৭২০p এর মধ্যে হলে ব্যাকগ্রাউন্ড অডিওর জন্য ২৪০p কোয়ালিটি ফেচ করা
+                const currentQNum = parseInt(getNumericQuality(global.appSettings?.normalVideo || '720'));
+                if (currentQNum >= 75 && currentQNum <= 720 && currentVideoIdRef.current && !isLocalRef.current) {
+                    try {
+                        const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&t=${Date.now()}`;
+                        const res = await fetch(apiUrl);
+                        const json = await res.json();
+                        if (json.success && (json.audioUrl || json.url)) {
+                            targetAudioUrl = json.audioUrl || json.url;
+                        }
+                    } catch(e) { console.log("Failed to fetch 240p audio fallback", e); }
+                }
+
                 const { sound } = await Audio.Sound.createAsync(
                     { uri: targetAudioUrl },
                     { shouldPlay: false } 
