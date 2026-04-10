@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
-// [FIX]: Deprecation warning ইগনোর করার জন্য
 LogBox.ignoreLogs(['[expo-av] Expo AV has been deprecated']);
 
 const { width, height } = Dimensions.get('window');
@@ -13,6 +12,9 @@ const PLAYER_HEIGHT = (width * 9) / 16;
 const MINI_WIDTH = width * 0.45;
 const MINI_HEIGHT = (MINI_WIDTH * 9) / 16;
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
+
+// [RESTORED]: আপনার আগের কোয়ালিটি কন্ট্রোল লুপ
+const QUALITY_FALLBACK_ORDER = ['4320', '2160', '1440', '1080', '720', '480', '360', '240', '144'];
 
 const getNumericQuality = (q) => {
     if (!q || String(q).toLowerCase() === 'auto') return '720';
@@ -62,44 +64,50 @@ export default function GlobalPlayer() {
     } catch (e) { console.log(e); }
   };
 
+  // [RESTORED]: আপনার সেই আগের নিখুঁত লুপ সিস্টেমটি ফিরিয়ে আনা হয়েছে
   const fetchStreamUrl = async (vidId, targetQuality) => {
     const requestedQ = getNumericQuality(targetQuality);
+    let startIndex = QUALITY_FALLBACK_ORDER.indexOf(requestedQ);
+    if (startIndex === -1) startIndex = 4; // Default 720p
+
     setErrorMsg(null);
 
-    try {
-        const apiUrl = `${MY_API_SERVER}/api/fast-play?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${requestedQ}&type=video`;
-        const res = await fetch(apiUrl);
-        const json = await res.json();
+    for (let i = startIndex; i < QUALITY_FALLBACK_ORDER.length; i++) {
+        let attemptQ = QUALITY_FALLBACK_ORDER[i];
+        try {
+            const apiUrl = `${MY_API_SERVER}/api/fast-play?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${attemptQ}&type=video`;
+            const res = await fetch(apiUrl);
+            const json = await res.json();
 
-        if (json.success && json.url) {
-            setStreamMode(json.streamType || 'combined');
-            
-            if (json.streamType === 'separate' && json.audioUrl) {
-                Promise.all([
-                    syncAudioRef.current.unloadAsync(),
-                    setStreamUrl(json.url),
-                    setAudioStreamUrl(json.audioUrl)
-                ]).then(() => {
-                    syncAudioRef.current.loadAsync(
-                        { uri: json.audioUrl }, 
-                        { shouldPlay: true, progressUpdateIntervalMillis: 100 } 
-                    ).catch(e => console.log(e));
-                });
-            } else {
-                await syncAudioRef.current.unloadAsync();
-                setStreamUrl(json.url);
-                setAudioStreamUrl(json.url);
+            if (json.success && json.url) {
+                setStreamMode(json.streamType || 'combined');
+                
+                if (json.streamType === 'separate' && json.audioUrl) {
+                    Promise.all([
+                        syncAudioRef.current.unloadAsync(),
+                        setStreamUrl(json.url),
+                        setAudioStreamUrl(json.audioUrl)
+                    ]).then(() => {
+                        syncAudioRef.current.loadAsync(
+                            { uri: json.audioUrl }, 
+                            { shouldPlay: true, progressUpdateIntervalMillis: 100 } 
+                        ).catch(e => console.log(e));
+                    });
+                } else {
+                    await syncAudioRef.current.unloadAsync();
+                    setStreamUrl(json.url);
+                    setAudioStreamUrl(json.url);
+                }
+
+                setIsPlaying(true);
+                setErrorMsg(null);
+                return; // সফল হলে লুপ থেকে বের হয়ে যাবে
             }
-
-            setIsPlaying(true);
-            setErrorMsg(null);
-        } else {
-            setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
+        } catch(e) { 
+            console.log(`Failed attempt for ${attemptQ}p`);
         }
-    } catch(e) { 
-        console.log(`Failed to fetch fast play`, e);
-        setErrorMsg("সার্ভার কানেকশন এরর!");
     }
+    setErrorMsg("ভিডিও লিংক পাওয়া যায়নি!");
   };
 
   const handlePlaybackStatusUpdate = async (status) => {
@@ -246,13 +254,11 @@ export default function GlobalPlayer() {
       await fetchStreamUrl(data.videoId, targetQuality);
     });
 
-    // [UPDATE]: SettingsScreen থেকে Quality পরিবর্তনের সিগন্যাল রিসিভ করা
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
         global.appSettings = global.appSettings || {};
         global.appSettings.normalVideo = newQuality;
 
         if (currentVideoIdRef.current && !isLocalRef.current) { 
-            console.log("Quality changed to:", newQuality, "Fetching new stream...");
             setIsPlaying(false); 
             setStreamUrl(null);  
             setErrorMsg(null);
@@ -265,7 +271,7 @@ export default function GlobalPlayer() {
             if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
             
             setVideoKey(Date.now().toString()); 
-            await fetchStreamUrl(currentVideoIdRef.current, newQuality);
+            await fetchStreamUrl(currentVideoIdRef.current, newQuality); // লুপের মাধ্যমে নতুন কোয়ালিটি খুঁজবে
         }
     });
 
