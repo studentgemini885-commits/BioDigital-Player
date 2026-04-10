@@ -23,7 +23,7 @@ const getNumericQuality = (q) => {
 export default function GlobalPlayer() {
   const navigation = useNavigation();
   const videoRef = useRef(null);
-  const audioRef = useRef(null); // [FIX]: ব্যাকগ্রাউন্ড অডিওর জন্য ডেডিকেটেড রিফারেন্স
+  const audioRef = useRef(null); 
   const syncAudioRef = useRef(new Audio.Sound()); 
 
   const currentVideoIdRef = useRef(null);
@@ -120,7 +120,6 @@ export default function GlobalPlayer() {
         await setBackgroundAudio(true); 
 
         try {
-            // ১. মূল ভিডিও পজ করে দেওয়া হলো যেন এমবি না কাটে
             let currentPos = 0;
             if (videoRef.current) {
                 const status = await videoRef.current.getStatusAsync();
@@ -133,12 +132,13 @@ export default function GlobalPlayer() {
 
             let targetAudioUrl = null; 
 
-            // ২. [UPDATE]: ডাটা বাঁচানোর জন্য সার্ভার থেকে সরাসরি অডিও লিংক (Separated Audio) ফেচ করা
             if (!isLocalRef.current && currentVideoIdRef.current) {
                 try {
-                    const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&t=${Date.now()}`;
+                    // [UPDATE]: সার্ভার থেকে শুধুমাত্র অডিও লিংক প্লে করার জন্য &type=audio যুক্ত করা হয়েছে 
+                    const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&type=audio&t=${Date.now()}`;
                     const res = await fetch(apiUrl);
                     const json = await res.json();
+                    
                     if (json.success && json.audioUrl) {
                         targetAudioUrl = json.audioUrl;
                     } else if (json.success && json.url) {
@@ -151,7 +151,6 @@ export default function GlobalPlayer() {
                 targetAudioUrl = audioStreamUrl || streamUrl;
             }
 
-            // ৩. নতুন অডিও লিংক প্লে করা হলো
             const { sound } = await Audio.Sound.createAsync(
                 { uri: targetAudioUrl },
                 { shouldPlay: false } 
@@ -182,7 +181,6 @@ export default function GlobalPlayer() {
                 audioRef.current = null;
             }
 
-            // [FIX]: অডিও ইঞ্জিন কনফ্লিক্ট এড়ানোর জন্য ২০০ms ডিলে দিয়ে পুনরায় ভিডিও চালু করা
             setTimeout(async () => {
                 try {
                     if (videoRef.current) {
@@ -270,7 +268,6 @@ export default function GlobalPlayer() {
     });
 
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
-        // [UPDATE]: সরাসরি কোনো অ্যালার্ট ছাড়াই এমবি বাঁচানোর জন্য অডিও মোডে চলে যাবে
         if (mode) {
             switchToAudioMode();
         } else {
