@@ -162,39 +162,44 @@ export default function GlobalPlayer() {
                 await syncAudioRef.current.pauseAsync();
             }
 
-            let targetAudioUrl = audioStreamUrl || streamUrl; 
+            let targetAudioUrl = null; 
 
-            // [UPDATE]: Low এবং High কোয়ালিটির জন্য সুনির্দিষ্ট সার্ভার রিকোয়েস্ট লুপ
+            // [UPDATE]: Medium এবং High এর জন্য সরাসরি পৃথক (Separated) অডিও ট্র‍্যাক ফেচ করা হচ্ছে
             if (!isLocalRef.current && currentVideoIdRef.current) {
-                if (qualityType === 'low') {
-                    // Low Quality এর জন্য 240p অথবা 144p খুঁজবে
-                    const LOW_Q = ['240', '144'];
-                    for (let q of LOW_Q) {
-                        try {
-                            const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=${q}&merge=true&t=${Date.now()}`;
-                            const res = await fetch(apiUrl);
-                            const json = await res.json();
-                            if (json.success && (json.audioUrl || json.url)) {
-                                targetAudioUrl = json.audioUrl || json.url;
-                                break;
-                            }
-                        } catch(e) { console.log(`Failed to fetch low audio ${q}p`, e); }
-                    }
+                if (qualityType === 'medium') {
+                    // Medium এর জন্য ২৪০p কোয়ালিটি থেকে শুধুমাত্র অডিও ইউআরএল ফেচ
+                    try {
+                        const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&t=${Date.now()}`;
+                        const res = await fetch(apiUrl);
+                        const json = await res.json();
+                        if (json.success && json.audioUrl) {
+                            targetAudioUrl = json.audioUrl;
+                        } else if (json.success && json.url) {
+                            targetAudioUrl = json.url; // ফলব্যাক যদি কোনো কারণে অডিও আলাদা না থাকে
+                        }
+                    } catch(e) { console.log(`Failed to fetch medium audio 240p`, e); }
+                    
                 } else if (qualityType === 'high') {
-                    // Max Quality এর জন্য 8K থেকে নিচে খুঁজবে
+                    // High এর জন্য সর্বোচ্চ কোয়ালিটি থেকে শুধুমাত্র অডিও ইউআরএল ফেচ
                     const HIGH_Q = ['4320', '2160', '1440', '1080'];
                     for (let q of HIGH_Q) {
                         try {
                             const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=${q}&merge=true&t=${Date.now()}`;
                             const res = await fetch(apiUrl);
                             const json = await res.json();
-                            if (json.success && (json.audioUrl || json.url)) {
-                                targetAudioUrl = json.audioUrl || json.url;
+                            // শুধুমাত্র যেগুলোতে অডিও আলাদা করা আছে (json.audioUrl), সেগুলোই নিবে
+                            if (json.success && json.audioUrl) {
+                                targetAudioUrl = json.audioUrl;
                                 break;
                             }
-                        } catch(e) { console.log(`Failed to fetch max audio ${q}p`, e); }
+                        } catch(e) { console.log(`Failed to fetch high audio ${q}p`, e); }
                     }
                 }
+            }
+
+            // যদি উপরের ফেচ কোনো কারণে ব্যর্থ হয়, তবে আগের সেভ করা অডিও লিংকেই প্লে হবে
+            if (!targetAudioUrl) {
+                targetAudioUrl = audioStreamUrl || streamUrl;
             }
 
             const { sound } = await Audio.Sound.createAsync(
@@ -281,14 +286,14 @@ export default function GlobalPlayer() {
 
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
         if (mode) {
-            // [UPDATE]: Alert এ সঠিক নাম যুক্ত করা হয়েছে
+            // [UPDATE]: আপনার চাহিদা অনুযায়ী সঠিক অপশনের নাম দেওয়া হয়েছে
             Alert.alert(
                 "অডিও কোয়ালিটি",
                 "ব্যাকগ্রাউন্ড অডিওর কোয়ালিটি নির্বাচন করুন:",
                 [
-                    { text: "Low Quality (240p)", onPress: () => switchToAudioMode('low') },
-                    { text: "Max Quality (8K/4K/2K)", onPress: () => switchToAudioMode('high') },
-                    { text: "Cancel", style: "cancel" }
+                    { text: "Medium (240p)", onPress: () => switchToAudioMode('medium') },
+                    { text: "High (Max Quality)", onPress: () => switchToAudioMode('high') },
+                    { text: "Cancel", style: "cancel", onPress: () => switchToVideoMode() } // Cancel করলে যেন ভিডিও মোডেই ফেরত যায়
                 ]
             );
         } else {
