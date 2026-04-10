@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import * as FileSystem from 'expo-file-system/legacy'; 
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16; 
@@ -66,63 +65,84 @@ export default function PlayerScreen({ route, navigation }) {
   const handleBackgroundPlay = () => {
     const newMode = !isAudioMode;
     setIsAudioMode(newMode);
-
     DeviceEventEmitter.emit('toggleAudioMode', newMode);
-
-    if (newMode) {
-        Alert.alert("অডিও মোড", "ভিডিও হাইড করা হয়েছে। স্ক্রিন বন্ধ করলেও এখন অডিও চলতে থাকবে।");
-    } else {
-        Alert.alert("ভিডিও মোড", "ভিডিও পুনরায় দৃশ্যমান করা হয়েছে।");
-    }
   };
 
+  // [UPDATE]: সার্ভারের ডাউনলোড ইঞ্জিন ব্যবহার করে নিখুঁত ডাউনলোড সিস্টেম
   const handleDownloadExecute = async (item) => {
     try {
       setShowDownloadModal(false);
       setIsDownloading(true);
-      setTimeout(() => setIsDownloading(false), 1000);
+      setTimeout(() => setIsDownloading(false), 2000);
 
       const downloadId = Date.now().toString(); 
       const safeTitle = (videoData.title || 'video').replace(/[^a-zA-Z0-9]/g, '_');
-      const fileExt = downloadType === 'audio' ? 'mp3' : 'mp4';
-      const fileUri = `${FileSystem.documentDirectory}${safeTitle}_${item.quality.replace(/[^0-9]/g, '')}p.${fileExt}`;
+      
+      // ১. সার্ভারকে ডাউনলোডের নির্দেশ দেওয়া
+      const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      const dlApiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&url=${encodeURIComponent(targetUrl)}&quality=${item.quality}&type=${downloadType}&title=${encodeURIComponent(safeTitle)}`;
+      
+      const response = await fetch(dlApiUrl);
+      const resJson = await response.json();
 
-      const downloadResumable = FileSystem.createDownloadResumable(
-        item.url, 
-        fileUri, 
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-          }
-        },
-        (downloadInfo) => { 
-            const progress = downloadInfo.totalBytesWritten / downloadInfo.totalBytesExpectedToWrite;
-            const percentage = Math.round(progress * 100);
+      if (resJson.success) {
+          Alert.alert("ডাউনলোড শুরু হয়েছে", "ফাইলটি আপনার MyTube ফোল্ডারে সেভ হচ্ছে।");
 
-            DeviceEventEmitter.emit('live_download_progress', {
-                id: downloadId,
-                title: videoData.title,
-                thumbnail: videoData.thumbnail,
-                quality: item.quality,
-                type: downloadType,
-                progress: percentage
-            });
-        }
-      );
+          // ২. প্রতি ১ সেকেন্ড পর পর প্রোগ্রেস চেক করা
+          const progressInterval = setInterval(async () => {
+              try {
+                  const progRes = await fetch(`${MY_API_SERVER}/api/progress`);
+                  const progData = await progRes.json();
+                  
+                  if (progData.activeDownloads && progData.activeDownloads[downloadId]) {
+                      const dlInfo = progData.activeDownloads[downloadId];
+                      
+                      DeviceEventEmitter.emit('live_download_progress', {
+                          id: downloadId,
+                          title: videoData.title,
+                          thumbnail: videoData.thumbnail,
+                          quality: item.quality,
+                          type: downloadType,
+                          progress: dlInfo.progress
+                      });
 
-      const { uri } = await downloadResumable.downloadAsync();
+                      if (dlInfo.status === 'completed') {
+                          clearInterval(progressInterval);
+                          
+                          // ডাউনলোড শেষ হলে মেমরিতে সেভ করা
+                          const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
+                          let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
 
-      const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
-      let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
+                          downloadList.unshift({ 
+                              id: downloadId, 
+                              videoId, 
+                              title: videoData.title, 
+                              thumbnail: videoData.thumbnail, 
+                              quality: item.quality, 
+                              type: downloadType, 
+                              localUri: dlInfo.localUrl, // সার্ভারের লোকাল পাথ
+                              isCompleted: true, 
+                              date: new Date().toLocaleDateString() 
+                          });
+                          await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
 
-      downloadList.unshift({ id: downloadId, videoId, title: videoData.title, thumbnail: videoData.thumbnail, quality: item.quality, type: downloadType, localUri: uri, isCompleted: true, date: new Date().toLocaleDateString() });
-      await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
+                          DeviceEventEmitter.emit('live_download_complete', { id: downloadId });
+                          fetch(`${MY_API_SERVER}/api/clear-progress?id=${downloadId}`); // সার্ভার থেকে মেমরি ক্লিন
+                          Alert.alert("সম্পন্ন", "ডাউনলোড সফলভাবে সম্পন্ন হয়েছে।");
+                      } else if (dlInfo.status === 'error') {
+                          clearInterval(progressInterval);
+                          DeviceEventEmitter.emit('live_download_complete', { id: 'error' });
+                          Alert.alert("ত্রুটি", "ডাউনলোড ব্যর্থ হয়েছে।");
+                      }
+                  }
+              } catch(e) {}
+          }, 1000);
+      } else {
+          Alert.alert("ত্রুটি", "সার্ভার ডাউনলোড শুরু করতে ব্যর্থ হয়েছে।");
+      }
 
-      DeviceEventEmitter.emit('live_download_complete', { id: downloadId });
-      Alert.alert("সম্পন্ন", "ফাইলটি সফলভাবে ডাউনলোড হয়েছে।");
     } catch (error) {
-      DeviceEventEmitter.emit('live_download_complete', { id: 'error' });
-      Alert.alert("ত্রুটি", "ডাউনলোড ব্যর্থ হয়েছে।");
+      Alert.alert("সার্ভার এরর", "সার্ভারের সাথে কানেক্ট করা যায়নি।");
     }
   };
 
@@ -135,8 +155,6 @@ export default function PlayerScreen({ route, navigation }) {
   const fetchDownloadLinks = async (type) => {
     try {
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      
-      // [FIX]: অডিও/ভিডিও অনুযায়ী নির্দিষ্ট রিকোয়েস্ট পাঠানোর জন্য type প্যারামিটার যুক্ত করা হলো
       const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(targetUrl)}&action=download&type=${type}`;
       
       const response = await fetch(apiUrl);
@@ -287,7 +305,6 @@ export default function PlayerScreen({ route, navigation }) {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* [UPDATE]: প্রো-লেভেল ডাউনলোড বটম শিট ডিজাইন */}
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -390,32 +407,4 @@ const styles = StyleSheet.create({
     recThumb: { width: 140, height: 80, borderRadius: 8, backgroundColor: '#222' },
     recInfo: { flex: 1, marginLeft: 12, justifyContent: 'center' },
     recTitle: { color: '#FFF', fontSize: 14 },
-    recMeta: { color: '#AAA', fontSize: 11, marginTop: 4 },
-    offlineTypeIndicator: { position: 'absolute', bottom: 15, left: 15, backgroundColor: 'rgba(0,0,0,0.7)', padding: 4, borderRadius: 12 },
-    
-    // [UPDATE]: ডাউনলোড মডাল / বটম শিট স্টাইলস
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-    modalContent: { backgroundColor: '#1A1A1A', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 30, maxHeight: height * 0.7, minHeight: 350 },
-    modalDragIndicator: { width: 40, height: 5, backgroundColor: '#444', borderRadius: 3, alignSelf: 'center', marginBottom: 20 },
-    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25 },
-    modalTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
-    modalSubtitle: { color: '#888', fontSize: 13, marginTop: 3 },
-    modalCloseBtn: { padding: 6, backgroundColor: '#2A2A2A', borderRadius: 20 },
-    
-    selectionRow: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 10 },
-    selectCard: { backgroundColor: '#242424', borderRadius: 16, width: '47%', alignItems: 'center', paddingVertical: 30, borderWidth: 1, borderColor: '#333' },
-    iconContainer: { width: 70, height: 70, borderRadius: 35, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-    selectCardTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-    selectCardSub: { color: '#888', fontSize: 12, marginTop: 5 },
-    
-    loadingContainer: { paddingVertical: 50, alignItems: 'center', justifyContent: 'center' },
-    loadingText: { color: '#AAA', marginTop: 20, fontSize: 15 },
-    
-    listHeaderTitle: { color: '#AAA', fontSize: 14, fontWeight: 'bold', marginBottom: 15, marginLeft: 5 },
-    qualityListContainer: { paddingBottom: 20 },
-    qualityCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#242424', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#333' },
-    qualityInfoLeft: { flexDirection: 'row', alignItems: 'center' },
-    qualityText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-    qualitySubText: { color: '#888', fontSize: 12, marginTop: 2 },
-    downloadIconWrapper: { backgroundColor: 'rgba(0, 191, 165, 0.1)', padding: 8, borderRadius: 12 }
-});
+    recMeta: { color:
