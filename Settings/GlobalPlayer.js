@@ -28,7 +28,7 @@ export default function GlobalPlayer() {
 
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
-  const isAudioModeRef = useRef(false); // [FIX]: ইভেন্ট লিসেনারের ভেতরে সঠিক স্টেট ট্র্যাক রাখার জন্য
+  const isAudioModeRef = useRef(false); 
 
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
@@ -113,7 +113,6 @@ export default function GlobalPlayer() {
   };
 
   useEffect(() => {
-    // [FIX]: কোড ক্লিন রাখার জন্য অডিও/ভিডিও সুইচ লজিক আলাদা ফাংশনে আনা হয়েছে
     const switchToVideoMode = async () => {
         setIsSwitching(true);
         setIsAudioMode(false);
@@ -163,18 +162,39 @@ export default function GlobalPlayer() {
                 await syncAudioRef.current.pauseAsync();
             }
 
-            let targetAudioUrl = audioStreamUrl || streamUrl;
+            let targetAudioUrl = audioStreamUrl || streamUrl; 
 
-            // [NEW]: মিডিয়াম কোয়ালিটির জন্য ২৪০p অডিও ফেচ করা
-            if (qualityType === 'medium' && currentVideoIdRef.current && !isLocalRef.current) {
-                try {
-                    const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&t=${Date.now()}`;
-                    const res = await fetch(apiUrl);
-                    const json = await res.json();
-                    if (json.success && (json.audioUrl || json.url)) {
-                        targetAudioUrl = json.audioUrl || json.url;
+            // [UPDATE]: Low এবং High কোয়ালিটির জন্য সুনির্দিষ্ট সার্ভার রিকোয়েস্ট লুপ
+            if (!isLocalRef.current && currentVideoIdRef.current) {
+                if (qualityType === 'low') {
+                    // Low Quality এর জন্য 240p অথবা 144p খুঁজবে
+                    const LOW_Q = ['240', '144'];
+                    for (let q of LOW_Q) {
+                        try {
+                            const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=${q}&merge=true&t=${Date.now()}`;
+                            const res = await fetch(apiUrl);
+                            const json = await res.json();
+                            if (json.success && (json.audioUrl || json.url)) {
+                                targetAudioUrl = json.audioUrl || json.url;
+                                break;
+                            }
+                        } catch(e) { console.log(`Failed to fetch low audio ${q}p`, e); }
                     }
-                } catch(e) { console.log("Failed to fetch 240p audio fallback", e); }
+                } else if (qualityType === 'high') {
+                    // Max Quality এর জন্য 8K থেকে নিচে খুঁজবে
+                    const HIGH_Q = ['4320', '2160', '1440', '1080'];
+                    for (let q of HIGH_Q) {
+                        try {
+                            const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=${q}&merge=true&t=${Date.now()}`;
+                            const res = await fetch(apiUrl);
+                            const json = await res.json();
+                            if (json.success && (json.audioUrl || json.url)) {
+                                targetAudioUrl = json.audioUrl || json.url;
+                                break;
+                            }
+                        } catch(e) { console.log(`Failed to fetch max audio ${q}p`, e); }
+                    }
+                }
             }
 
             const { sound } = await Audio.Sound.createAsync(
@@ -199,7 +219,6 @@ export default function GlobalPlayer() {
       if (videoData?.id === data.videoId) {
         setPlayerState('full');
         
-        // [FIX]: অডিও মোড থেকে ভিডিওতে চাপ দিয়ে ফিরলে দুটি অডিও একসাথে চলার সমস্যা সমাধান
         if (isAudioModeRef.current) {
             await switchToVideoMode();
         } else {
@@ -262,13 +281,13 @@ export default function GlobalPlayer() {
 
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
         if (mode) {
-            // [NEW]: ব্যাকগ্রাউন্ড অডিও বাটনে চাপ দিলে Medium/High অপশন আসবে
+            // [UPDATE]: Alert এ সঠিক নাম যুক্ত করা হয়েছে
             Alert.alert(
                 "অডিও কোয়ালিটি",
                 "ব্যাকগ্রাউন্ড অডিওর কোয়ালিটি নির্বাচন করুন:",
                 [
-                    { text: "Medium (240p)", onPress: () => switchToAudioMode('medium') },
-                    { text: "High (Original)", onPress: () => switchToAudioMode('high') },
+                    { text: "Low Quality (240p)", onPress: () => switchToAudioMode('low') },
+                    { text: "Max Quality (8K/4K/2K)", onPress: () => switchToAudioMode('high') },
                     { text: "Cancel", style: "cancel" }
                 ]
             );
