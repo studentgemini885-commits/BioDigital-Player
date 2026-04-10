@@ -164,10 +164,12 @@ export default function GlobalPlayer() {
 
             let targetAudioUrl = null; 
 
-            // [UPDATE]: Medium এবং High এর জন্য সরাসরি পৃথক (Separated) অডিও ট্র‍্যাক ফেচ করা হচ্ছে
-            if (!isLocalRef.current && currentVideoIdRef.current) {
+            // [UPDATE]: Muxed কোয়ালিটি হলে কোনো API কল হবে না, সরাসরি বর্তমান লিংক অডিওতে প্লে হবে
+            if (qualityType === 'muxed') {
+                targetAudioUrl = audioStreamUrl || streamUrl;
+            } 
+            else if (!isLocalRef.current && currentVideoIdRef.current) {
                 if (qualityType === 'medium') {
-                    // Medium এর জন্য ২৪০p কোয়ালিটি থেকে শুধুমাত্র অডিও ইউআরএল ফেচ
                     try {
                         const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&t=${Date.now()}`;
                         const res = await fetch(apiUrl);
@@ -175,19 +177,17 @@ export default function GlobalPlayer() {
                         if (json.success && json.audioUrl) {
                             targetAudioUrl = json.audioUrl;
                         } else if (json.success && json.url) {
-                            targetAudioUrl = json.url; // ফলব্যাক যদি কোনো কারণে অডিও আলাদা না থাকে
+                            targetAudioUrl = json.url; 
                         }
                     } catch(e) { console.log(`Failed to fetch medium audio 240p`, e); }
                     
                 } else if (qualityType === 'high') {
-                    // High এর জন্য সর্বোচ্চ কোয়ালিটি থেকে শুধুমাত্র অডিও ইউআরএল ফেচ
                     const HIGH_Q = ['4320', '2160', '1440', '1080'];
                     for (let q of HIGH_Q) {
                         try {
                             const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=${q}&merge=true&t=${Date.now()}`;
                             const res = await fetch(apiUrl);
                             const json = await res.json();
-                            // শুধুমাত্র যেগুলোতে অডিও আলাদা করা আছে (json.audioUrl), সেগুলোই নিবে
                             if (json.success && json.audioUrl) {
                                 targetAudioUrl = json.audioUrl;
                                 break;
@@ -197,7 +197,6 @@ export default function GlobalPlayer() {
                 }
             }
 
-            // যদি উপরের ফেচ কোনো কারণে ব্যর্থ হয়, তবে আগের সেভ করা অডিও লিংকেই প্লে হবে
             if (!targetAudioUrl) {
                 targetAudioUrl = audioStreamUrl || streamUrl;
             }
@@ -286,16 +285,23 @@ export default function GlobalPlayer() {
 
     const toggleAudioSub = DeviceEventEmitter.addListener('toggleAudioMode', (mode) => {
         if (mode) {
-            // [UPDATE]: আপনার চাহিদা অনুযায়ী সঠিক অপশনের নাম দেওয়া হয়েছে
-            Alert.alert(
-                "অডিও কোয়ালিটি",
-                "ব্যাকগ্রাউন্ড অডিওর কোয়ালিটি নির্বাচন করুন:",
-                [
-                    { text: "Medium (240p)", onPress: () => switchToAudioMode('medium') },
-                    { text: "High (Max Quality)", onPress: () => switchToAudioMode('high') },
-                    { text: "Cancel", style: "cancel", onPress: () => switchToVideoMode() } // Cancel করলে যেন ভিডিও মোডেই ফেরত যায়
-                ]
-            );
+            const currentQNum = parseInt(getNumericQuality(global.appSettings?.normalVideo || '720'));
+            const muxedQualities = [360, 480, 720];
+
+            // [UPDATE]: ৩৬০p, ৪৮০p, ৭২০p সিলেক্ট থাকলে কোনো অ্যালার্ট ছাড়াই সরাসরি অডিও মোডে শিফট হবে
+            if (muxedQualities.includes(currentQNum)) {
+                switchToAudioMode('muxed');
+            } else {
+                Alert.alert(
+                    "অডিও কোয়ালিটি",
+                    "ব্যাকগ্রাউন্ড অডিওর কোয়ালিটি নির্বাচন করুন:",
+                    [
+                        { text: "Medium (240p)", onPress: () => switchToAudioMode('medium') },
+                        { text: "High (Max Quality)", onPress: () => switchToAudioMode('high') },
+                        { text: "Cancel", style: "cancel", onPress: () => switchToVideoMode() } 
+                    ]
+                );
+            }
         } else {
             switchToVideoMode();
         }
