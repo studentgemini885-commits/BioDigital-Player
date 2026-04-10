@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator, Image } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Text, ActivityIndicator, Image, LogBox } from 'react-native';
 import { Video, Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+
+// [FIX]: Deprecation warning ইগনোর করার জন্য
+LogBox.ignoreLogs(['[expo-av] Expo AV has been deprecated']);
 
 const { width, height } = Dimensions.get('window');
 const PLAYER_HEIGHT = (width * 9) / 16;
@@ -43,7 +46,8 @@ export default function GlobalPlayer() {
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
   const checkIsMuxed = () => {
-      const currentQNum = parseInt(getNumericQuality(global.appSettings?.normalVideo || '720'));
+      global.appSettings = global.appSettings || {};
+      const currentQNum = parseInt(getNumericQuality(global.appSettings.normalVideo || '720'));
       return [360, 480, 720].includes(currentQNum) || streamMode === 'combined';
   };
 
@@ -70,9 +74,7 @@ export default function GlobalPlayer() {
         if (json.success && json.url) {
             setStreamMode(json.streamType || 'combined');
             
-            // [SPEED UPDATE]: State update একসাথে করা হচ্ছে রি-রেন্ডার কমানোর জন্য
             if (json.streamType === 'separate' && json.audioUrl) {
-                // ভিডিও এবং অডিও একসাথে লোড করার ট্রিক
                 Promise.all([
                     syncAudioRef.current.unloadAsync(),
                     setStreamUrl(json.url),
@@ -80,7 +82,7 @@ export default function GlobalPlayer() {
                 ]).then(() => {
                     syncAudioRef.current.loadAsync(
                         { uri: json.audioUrl }, 
-                        { shouldPlay: true, progressUpdateIntervalMillis: 100 } // রকেট স্পিড প্লেব্যাক
+                        { shouldPlay: true, progressUpdateIntervalMillis: 100 } 
                     ).catch(e => console.log(e));
                 });
             } else {
@@ -105,14 +107,12 @@ export default function GlobalPlayer() {
         const audioStatus = await syncAudioRef.current.getStatusAsync();
         if (!audioStatus.isLoaded) return;
 
-        // [SPEED UPDATE]: বাফারিং এর সময় কমানো হয়েছে এবং সিঙ্ক্রোনাইজেশন টাইট করা হয়েছে
         if (status.isPlaying && !audioStatus.isPlaying) {
             await syncAudioRef.current.playAsync();
         } else if (!status.isPlaying && audioStatus.isPlaying) {
             await syncAudioRef.current.pauseAsync();
         }
 
-        // যদি ভিডিও এবং অডিওর মধ্যে ২০০ms এর বেশি পার্থক্য থাকে, তবেই সিঙ্ক হবে
         if (status.isPlaying && Math.abs(status.positionMillis - audioStatus.positionMillis) > 200) {
             await syncAudioRef.current.setPositionAsync(status.positionMillis);
         }
@@ -156,7 +156,7 @@ export default function GlobalPlayer() {
 
                 const { sound } = await Audio.Sound.createAsync(
                     { uri: targetAudioUrl },
-                    { shouldPlay: true, positionMillis: currentPos } // [SPEED UPDATE]: লোড হওয়ার সাথেই প্লে হবে এবং নির্দিষ্ট পজিশনে
+                    { shouldPlay: true, positionMillis: currentPos } 
                 );
                 audioRef.current = sound;
                 setIsPlaying(true);
@@ -186,7 +186,6 @@ export default function GlobalPlayer() {
                 const status = await audioRef.current.getStatusAsync();
                 currentPos = status.positionMillis || 0;
                 
-                // [SPEED UPDATE]: আনলোড এবং প্লেব্যাক প্যারালাল করা হয়েছে
                 Promise.all([
                     audioRef.current.unloadAsync(),
                     videoRef.current ? videoRef.current.setPositionAsync(currentPos) : Promise.resolve(),
@@ -242,20 +241,32 @@ export default function GlobalPlayer() {
           return;
       }
 
-      const targetQuality = global.appSettings?.normalVideo || '720p';
+      global.appSettings = global.appSettings || {};
+      const targetQuality = global.appSettings.normalVideo || '720p';
       await fetchStreamUrl(data.videoId, targetQuality);
     });
 
+    // [UPDATE]: SettingsScreen থেকে Quality পরিবর্তনের সিগন্যাল রিসিভ করা
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
-      if (currentVideoIdRef.current && !isLocalRef.current) { 
-        setIsPlaying(false); 
-        setStreamUrl(null);  
-        setErrorMsg(null);
-        if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
-        setVideoKey(Date.now().toString()); 
+        global.appSettings = global.appSettings || {};
+        global.appSettings.normalVideo = newQuality;
 
-        await fetchStreamUrl(currentVideoIdRef.current, newQuality);
-      }
+        if (currentVideoIdRef.current && !isLocalRef.current) { 
+            console.log("Quality changed to:", newQuality, "Fetching new stream...");
+            setIsPlaying(false); 
+            setStreamUrl(null);  
+            setErrorMsg(null);
+            
+            if (videoRef.current) await videoRef.current.pauseAsync();
+            if (audioRef.current) {
+                await audioRef.current.unloadAsync();
+                audioRef.current = null;
+            }
+            if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
+            
+            setVideoKey(Date.now().toString()); 
+            await fetchStreamUrl(currentVideoIdRef.current, newQuality);
+        }
     });
 
     const minSub = DeviceEventEmitter.addListener('minimizeVideo', () => setPlayerState('mini'));
@@ -278,7 +289,14 @@ export default function GlobalPlayer() {
       setIsPlaying(false);
     });
 
-    return () => { playSub.remove(); qualitySub.remove(); minSub.remove(); maxSub.remove(); toggleAudioSub.remove(); stopSub.remove(); };
+    return () => { 
+        playSub.remove(); 
+        qualitySub.remove(); 
+        minSub.remove(); 
+        maxSub.remove(); 
+        toggleAudioSub.remove(); 
+        stopSub.remove(); 
+    };
   }, [videoData, streamUrl, audioStreamUrl, streamMode]); 
 
   useEffect(() => {
@@ -305,7 +323,8 @@ export default function GlobalPlayer() {
   if (playerState === 'hidden') return null;
   const isFull = playerState === 'full';
   
-  const isCurrentlyMuxed = [360, 480, 720].includes(parseInt(getNumericQuality(global.appSettings?.normalVideo || '720'))) || streamMode === 'combined';
+  global.appSettings = global.appSettings || {};
+  const isCurrentlyMuxed = [360, 480, 720].includes(parseInt(getNumericQuality(global.appSettings.normalVideo || '720'))) || streamMode === 'combined';
   const shouldVideoPlay = isPlaying && (!isAudioMode || isCurrentlyMuxed);
 
   return (
@@ -328,7 +347,7 @@ export default function GlobalPlayer() {
                       isMuted={streamMode === 'separate'} 
                       useNativeControls={isFull} 
                       resizeMode={isFull ? "contain" : "cover"} 
-                      progressUpdateIntervalMillis={200} // [SPEED UPDATE]: বাফারিং ট্র্যাক ফাস্ট করা হয়েছে
+                      progressUpdateIntervalMillis={200} 
                       onPlaybackStatusUpdate={handlePlaybackStatusUpdate} 
                     />
                   </View>
