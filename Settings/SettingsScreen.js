@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { DeviceEventEmitter } from 'react-native'; // [NEW]: সিগন্যাল পাঠানোর জন্য ইম্পোর্ট করা হলো
 
 // গ্লোবাল মেমরি ডিক্লেয়ারেশন
 global.appSettings = global.appSettings || {};
@@ -42,6 +43,10 @@ export default function SettingsScreen() {
     setTimeout(() => {
       global.appSettings.normalVideo = res; 
       setSelectedMainQuality(res);
+      
+      // [UPDATE]: গ্লোবাল প্লেয়ারকে সরাসরি সিগন্যাল পাঠানো হচ্ছে!
+      DeviceEventEmitter.emit('qualityChanged', res);
+      
       setIsLoading(false); 
     }, 800);
   };
