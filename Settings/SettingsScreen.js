@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { DeviceEventEmitter } from 'react-native'; // [UPDATE]: সিগন্যাল পাঠানোর জন্য ইম্পোর্ট করা হলো
+import { DeviceEventEmitter } from 'react-native'; // [NEW]: সিগন্যাল পাঠানোর জন্য যুক্ত করা হলো
 
 // গ্লোবাল মেমরি ডিক্লেয়ারেশন
 global.appSettings = global.appSettings || {};
@@ -32,7 +32,7 @@ export default function SettingsScreen() {
       '4320p (8K)'
   ];
 
-  // শর্টস ভিডিওর জন্য আগের অপশনগুলো
+  // শর্টস ভিডিওর জন্য অপশন
   const shortVideoOptions = [
       'Anti Data Saver Mode', 
       'Low Video Quality', 
@@ -83,8 +83,7 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.listSection}>
-          
-          {/* লং ভিডিও কোয়ালিটি */}
+
           <ExpandableMenu 
             icon="tv-outline" label="Long Video Quality" 
             expanded={isMainQualityExpanded} onPress={() => setIsMainQualityExpanded(!isMainQualityExpanded)} 
@@ -99,7 +98,6 @@ export default function SettingsScreen() {
             </View>
           )}
 
-          {/* শর্টস ভিডিও কোয়ালিটি */}
           <ExpandableMenu 
             icon="phone-portrait-outline" label="Shorts Video Quality" 
             expanded={isShortQualityExpanded} onPress={() => setIsShortQualityExpanded(!isShortQualityExpanded)} 
