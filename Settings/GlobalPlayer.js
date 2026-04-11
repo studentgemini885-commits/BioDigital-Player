@@ -25,12 +25,14 @@ export default function GlobalPlayer() {
   const videoRef = useRef(null);
   const audioRef = useRef(null); 
   const syncAudioRef = useRef(new Audio.Sound()); 
+  
+  const seekPosRef = useRef(0);
 
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
   const isAudioModeRef = useRef(false); 
-  const seekPosRef = useRef(0);
 
+  const [currentQuality, setCurrentQuality] = useState(global.appSettings?.normalVideo || '720p');
   const [playerState, setPlayerState] = useState('hidden'); 
   const [videoData, setVideoData] = useState(null);
   const [streamUrl, setStreamUrl] = useState(null);
@@ -63,42 +65,39 @@ export default function GlobalPlayer() {
     } catch (e) { console.log(e); }
   };
 
+  // [FIXED]: আপনার অরিজিনাল API URL (/api/extract) ফিরিয়ে আনা হয়েছে
   const fetchStreamUrl = async (vidId, targetQuality) => {
-    const requestedQ = getNumericQuality(targetQuality);
-    setErrorMsg(null);
-
     try {
-        const apiUrl = `${MY_API_SERVER}/api/fast-play?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${requestedQ}&type=video`;
-        const res = await fetch(apiUrl);
-        const json = await res.json();
+      const numQ = getNumericQuality(targetQuality);
+      const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&quality=${numQ}&merge=true&t=${Date.now()}`;
+      
+      const res = await fetch(apiUrl);
+      const json = await res.json();
 
-        if (json.success && json.url) {
-            setStreamMode(json.streamType || 'combined');
-            
-            if (json.streamType === 'separate' && json.audioUrl) {
-                Promise.all([
-                    syncAudioRef.current.unloadAsync(),
-                    setStreamUrl(json.url),
-                    setAudioStreamUrl(json.audioUrl)
-                ]).then(() => {
-                    syncAudioRef.current.loadAsync(
-                        { uri: json.audioUrl }, 
-                        { shouldPlay: true, positionMillis: seekPosRef.current, progressUpdateIntervalMillis: 100 } 
-                    ).catch(e => console.log(e));
-                });
-            } else {
-                await syncAudioRef.current.unloadAsync();
-                setStreamUrl(json.url);
-                setAudioStreamUrl(json.url);
-            }
+      if (json.success && json.url) {
+          setStreamMode(json.streamType || 'combined');
+          setStreamUrl(json.url);
+          setAudioStreamUrl(json.audioUrl || json.url); 
 
-            setIsPlaying(true);
-            setErrorMsg(null);
-        } else {
-            setErrorMsg("This quality video is not available");
-        }
+          if (json.streamType === 'separate' && json.audioUrl) {
+              try {
+                  await syncAudioRef.current.unloadAsync();
+                  await syncAudioRef.current.loadAsync(
+                      { uri: json.audioUrl },
+                      { shouldPlay: true, positionMillis: seekPosRef.current, progressUpdateIntervalMillis: 100 }
+                  );
+              } catch(e) { console.log(e); }
+          } else {
+              try { await syncAudioRef.current.unloadAsync(); } catch(e){}
+          }
+
+          setIsPlaying(true);
+          setErrorMsg(null);
+      } else {
+          setErrorMsg("This quality video is not available");
+      }
     } catch(e) { 
-        setErrorMsg("This quality video is not available");
+      setErrorMsg("সার্ভার কানেকশন এরর!");
     }
   };
 
@@ -110,53 +109,54 @@ export default function GlobalPlayer() {
     }
 
     if (streamMode === 'separate' && syncAudioRef.current && status.isLoaded && !isAudioMode) {
-        const audioStatus = await syncAudioRef.current.getStatusAsync();
-        if (!audioStatus.isLoaded) return;
+        try {
+            const audioStatus = await syncAudioRef.current.getStatusAsync();
+            if (!audioStatus.isLoaded) return;
 
-        if (status.isPlaying && !audioStatus.isPlaying) {
-            await syncAudioRef.current.playAsync();
-        } else if (!status.isPlaying && audioStatus.isPlaying) {
-            await syncAudioRef.current.pauseAsync();
-        }
+            if (status.isPlaying && !audioStatus.isPlaying) {
+                await syncAudioRef.current.playAsync();
+            } else if (!status.isPlaying && audioStatus.isPlaying) {
+                await syncAudioRef.current.pauseAsync();
+            }
 
-        if (status.isPlaying && Math.abs(status.positionMillis - audioStatus.positionMillis) > 500) {
-            await syncAudioRef.current.setPositionAsync(status.positionMillis);
-        }
+            if (status.isPlaying && Math.abs(status.positionMillis - audioStatus.positionMillis) > 500) {
+                await syncAudioRef.current.setPositionAsync(status.positionMillis);
+            }
+        } catch(e) {}
     }
   };
 
-  // =========================================================
-  // [NEW]: SettingsScreen এর সিগন্যাল ধরার প্রধান লিসেনার
-  // =========================================================
+  // [FIXED]: সুরক্ষিত এবং স্বাধীন Quality Listener
   useEffect(() => {
     const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
-      if (currentVideoIdRef.current && !isLocalRef.current) { 
-        
-        let currentPos = 0;
-        if (videoRef.current) {
-            try {
-                const status = await videoRef.current.getStatusAsync();
-                currentPos = status.positionMillis || 0;
-                await videoRef.current.pauseAsync();
-            } catch(e){}
-        }
+        global.appSettings = global.appSettings || {};
+        global.appSettings.normalVideo = newQuality;
+        setCurrentQuality(newQuality);
 
-        seekPosRef.current = currentPos; // ভিডিওর পজিশন সেভ রাখা
-        setIsPlaying(false); 
-        setStreamUrl(null);  
-        setErrorMsg(null);
-        
-        if (audioRef.current) {
-            await audioRef.current.unloadAsync();
-            audioRef.current = null;
+        if (currentVideoIdRef.current && !isLocalRef.current) { 
+            let currentPos = 0;
+            if (videoRef.current) {
+                try {
+                    const status = await videoRef.current.getStatusAsync();
+                    currentPos = status.positionMillis || 0;
+                    await videoRef.current.pauseAsync();
+                } catch(e){}
+            }
+
+            seekPosRef.current = currentPos; 
+            setIsPlaying(false); 
+            setStreamUrl(null);  
+            setErrorMsg(null);
+            
+            if (audioRef.current) {
+                try { await audioRef.current.unloadAsync(); } catch(e){}
+                audioRef.current = null;
+            }
+            try { await syncAudioRef.current.unloadAsync(); } catch(e){}
+            
+            setVideoKey(Date.now().toString()); 
+            await fetchStreamUrl(currentVideoIdRef.current, newQuality);
         }
-        if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
-        
-        setVideoKey(Date.now().toString()); 
-        
-        // নতুন কোয়ালিটিতে ভিডিও রিলোড করা হচ্ছে
-        await fetchStreamUrl(currentVideoIdRef.current, newQuality);
-      }
     });
 
     return () => { qualitySub.remove(); };
@@ -173,21 +173,29 @@ export default function GlobalPlayer() {
             const isMuxed = checkIsMuxed();
 
             if (isMuxed) {
-                if (videoRef.current) await videoRef.current.playAsync();
+                // [FIX 1]: Muxed ভিডিওর ক্ষেত্রে ভিডিও চলবে কিন্তু ব্যাকগ্রাউন্ডে। 
+                if (videoRef.current) {
+                    try { await videoRef.current.playAsync(); } catch(e){}
+                }
                 setIsPlaying(true);
             } else {
                 let currentPos = 0;
                 if (videoRef.current) {
-                    const status = await videoRef.current.getStatusAsync();
-                    currentPos = status.positionMillis || 0;
-                    await videoRef.current.pauseAsync(); 
+                    try {
+                        const status = await videoRef.current.getStatusAsync();
+                        currentPos = status.positionMillis || 0;
+                        await videoRef.current.pauseAsync(); 
+                    } catch(e){}
                 }
-                if (syncAudioRef.current) await syncAudioRef.current.pauseAsync();
+                if (syncAudioRef.current) {
+                    try { await syncAudioRef.current.pauseAsync(); } catch(e){}
+                }
 
                 let targetAudioUrl = null; 
                 if (!isLocalRef.current && currentVideoIdRef.current) {
                     try {
-                        const apiUrl = `${MY_API_SERVER}/api/fast-play?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&type=audio`;
+                        // [FIXED]: এখানেও আপনার অরিজিনাল API URL দেওয়া হয়েছে
+                        const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&type=audio&t=${Date.now()}`;
                         const res = await fetch(apiUrl);
                         const json = await res.json();
                         if (json.success && json.audioUrl) targetAudioUrl = json.audioUrl;
@@ -197,12 +205,14 @@ export default function GlobalPlayer() {
 
                 if (!targetAudioUrl) targetAudioUrl = audioStreamUrl || streamUrl;
 
-                const { sound } = await Audio.Sound.createAsync(
-                    { uri: targetAudioUrl },
-                    { shouldPlay: true, positionMillis: currentPos } 
-                );
-                audioRef.current = sound;
-                setIsPlaying(true);
+                try {
+                    const { sound } = await Audio.Sound.createAsync(
+                        { uri: targetAudioUrl },
+                        { shouldPlay: true, positionMillis: currentPos } 
+                    );
+                    audioRef.current = sound;
+                    setIsPlaying(true);
+                } catch(e){}
             }
         } catch (error) {}
         setIsSwitching(false);
@@ -218,29 +228,42 @@ export default function GlobalPlayer() {
             const isMuxed = checkIsMuxed();
 
             if (isMuxed) {
-                if (videoRef.current) await videoRef.current.playAsync();
+                if (videoRef.current) {
+                    try { await videoRef.current.playAsync(); } catch(e){}
+                }
                 setIsPlaying(true);
                 setIsSwitching(false);
                 return;
             }
 
             let currentPos = 0;
+            
+            // [FIX 2]: Promise.all সরিয়ে নিরাপদ try/catch ব্লক
             if (audioRef.current) {
-                const status = await audioRef.current.getStatusAsync();
-                currentPos = status.positionMillis || 0;
-                
-                Promise.all([
-                    audioRef.current.unloadAsync(),
-                    videoRef.current ? videoRef.current.setPositionAsync(currentPos) : Promise.resolve(),
-                    syncAudioRef.current && streamMode === 'separate' ? syncAudioRef.current.setPositionAsync(currentPos) : Promise.resolve()
-                ]).then(async () => {
-                     audioRef.current = null;
-                     if (videoRef.current) await videoRef.current.playAsync();
-                     if (syncAudioRef.current && streamMode === 'separate') await syncAudioRef.current.playAsync();
-                     setIsPlaying(true);
-                     setIsSwitching(false);
-                });
-            } else { setIsSwitching(false); }
+                try {
+                    const status = await audioRef.current.getStatusAsync();
+                    currentPos = status.positionMillis || 0;
+                    await audioRef.current.unloadAsync(); 
+                } catch(e){}
+                audioRef.current = null;
+            }
+
+            try {
+                if (videoRef.current) {
+                    await videoRef.current.setPositionAsync(currentPos);
+                    await videoRef.current.playAsync(); 
+                }
+            } catch(e){}
+
+            try {
+                if (syncAudioRef.current && streamMode === 'separate') {
+                    await syncAudioRef.current.setPositionAsync(currentPos);
+                    await syncAudioRef.current.playAsync();
+                }
+            } catch(e){}
+
+            setIsPlaying(true);
+            setIsSwitching(false);
         } catch (e) { setIsSwitching(false); }
     };
 
@@ -258,8 +281,11 @@ export default function GlobalPlayer() {
         return; 
       }
 
-      if (audioRef.current) { await audioRef.current.unloadAsync(); audioRef.current = null; }
-      if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
+      if (audioRef.current) { 
+          try { await audioRef.current.unloadAsync(); } catch(e){}
+          audioRef.current = null; 
+      }
+      try { await syncAudioRef.current.unloadAsync(); } catch(e){}
 
       setIsAudioMode(isAudio);
       isAudioModeRef.current = isAudio;
@@ -298,9 +324,9 @@ export default function GlobalPlayer() {
 
     const stopSub = DeviceEventEmitter.addListener('stopVideo', async () => {
       await setBackgroundAudio(false); 
-      if (videoRef.current) await videoRef.current.pauseAsync();
-      if (audioRef.current) { await audioRef.current.unloadAsync(); audioRef.current = null; }
-      if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
+      if (videoRef.current) { try { await videoRef.current.pauseAsync(); } catch(e){} }
+      if (audioRef.current) { try { await audioRef.current.unloadAsync(); audioRef.current = null; } catch(e){} }
+      try { await syncAudioRef.current.unloadAsync(); } catch(e){}
 
       setPlayerState('hidden');
       setStreamUrl(null);
@@ -319,8 +345,8 @@ export default function GlobalPlayer() {
 
   useEffect(() => {
     return () => {
-      if (audioRef.current) audioRef.current.unloadAsync();
-      if (syncAudioRef.current) syncAudioRef.current.unloadAsync();
+      if (audioRef.current) { try{ audioRef.current.unloadAsync(); } catch(e){} }
+      try { syncAudioRef.current.unloadAsync(); } catch(e){}
     };
   }, []);
 
@@ -360,7 +386,8 @@ export default function GlobalPlayer() {
                       </Text>
                   </View>
                ) : streamUrl ? (
-                  <View style={{ flex: 1, display: isAudioMode ? 'none' : 'flex' }}>
+                  /* [UI FIX]: Muxed ভিডিওর ব্যাকগ্রাউন্ড অডিওর জন্য opacity: 0 */
+                  <View style={[styles.videoCoreWrapper, isAudioMode && styles.hiddenVideoStyle]}>
                     <Video 
                       key={videoKey} 
                       ref={videoRef} 
@@ -368,7 +395,7 @@ export default function GlobalPlayer() {
                       style={styles.video} 
                       shouldPlay={shouldVideoPlay} 
                       isMuted={streamMode === 'separate'} 
-                      useNativeControls={isFull} 
+                      useNativeControls={isFull && !isAudioMode} 
                       resizeMode={isFull ? "contain" : "cover"} 
                       progressUpdateIntervalMillis={500}
                       onPlaybackStatusUpdate={handlePlaybackStatusUpdate} 
@@ -413,9 +440,9 @@ export default function GlobalPlayer() {
                      </TouchableOpacity>
                      <TouchableOpacity style={styles.miniCloseBtn} onPress={async () => {
                          await setBackgroundAudio(false); 
-                         if (videoRef.current) await videoRef.current.pauseAsync();
-                         if (audioRef.current) await audioRef.current.unloadAsync();
-                         if (syncAudioRef.current) await syncAudioRef.current.unloadAsync();
+                         if (videoRef.current) { try { await videoRef.current.pauseAsync(); } catch(e){} }
+                         if (audioRef.current) { try { await audioRef.current.unloadAsync(); audioRef.current = null; } catch(e){} }
+                         try { await syncAudioRef.current.unloadAsync(); } catch(e){}
                          setPlayerState('hidden'); setVideoData(null); setStreamUrl(null); setAudioStreamUrl(null); pan.setValue({ x:0, y:0 });
                      }}>
                         <Ionicons name="close" size={24} color="#FFF" />
@@ -434,6 +461,8 @@ const styles = StyleSheet.create({
   touchable: { flex: 1, width: '100%', height: '100%' },
   fullVideoWrapper: { flex: 1, backgroundColor: '#000', width: '100%', height: '100%', position: 'relative' },
   miniVideoWrapper: { flex: 1, width: '100%', height: '100%', backgroundColor: '#111', position: 'relative', borderRadius: 12, overflow: 'hidden' },
+  videoCoreWrapper: { flex: 1, width: '100%', height: '100%' },
+  hiddenVideoStyle: { position: 'absolute', opacity: 0, width: 1, height: 1, left: -9999 },
   video: { width: '100%', height: '100%' },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#111' },
   switchingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 50, justifyContent: 'center', alignItems: 'center' },
