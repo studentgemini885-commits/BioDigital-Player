@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { DeviceEventEmitter } from 'react-native'; // [NEW]: ভাসমান প্লেয়ারে সিগন্যাল পাঠানোর জন্য
+import { DeviceEventEmitter } from 'react-native'; 
 
-// গ্লোবাল মেমরি ডিক্লেয়ারেশন
 global.appSettings = global.appSettings || {};
 global.appSettings.normalVideo = global.appSettings.normalVideo || 'Auto'; 
 global.shortVideoQuality = global.shortVideoQuality || 'Normal Video Quality';
+
+const MY_API_SERVER = "http://127.0.0.1:10000";
 
 export default function SettingsScreen() {
   const [isMainQualityExpanded, setIsMainQualityExpanded] = useState(false);
@@ -15,29 +16,31 @@ export default function SettingsScreen() {
   const [isShortQualityExpanded, setIsShortQualityExpanded] = useState(false);
   const [selectedShortQuality, setSelectedShortQuality] = useState(global.shortVideoQuality);
 
+  // [NEW]: Download Location State
+  const [isLocationExpanded, setIsLocationExpanded] = useState(false);
+  const [downloadLocations, setDownloadLocations] = useState([{ label: 'Phone Memory', path: '/storage/emulated/0/MyTube' }]);
+  const [selectedLocation, setSelectedLocation] = useState('/storage/emulated/0/MyTube');
+
   const [isLoading, setIsLoading] = useState(false);
 
-  // লং ভিডিওর জন্য স্পেসিফিক কোয়ালিটি অপশন
+  // সার্ভার থেকে মেমোরি কার্ড (SD Card) ডিটেক্ট করা
+  useEffect(() => {
+    fetch(`${MY_API_SERVER}/api/storage-info`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setDownloadLocations(data.storages);
+          setSelectedLocation(data.current);
+        }
+      }).catch(e => console.log(e));
+  }, []);
+
   const longVideoOptions = [
-      'Auto',
-      '75p',
-      '144p', 
-      '240p', 
-      '360p', 
-      '480p', 
-      '720p', 
-      '1080p',
-      '1440p (2K)',
-      '2160p (4K)',
-      '4320p (8K)'
+      'Auto', '75p', '144p', '240p', '360p', '480p', '720p', '1080p', '1440p (2K)', '2160p (4K)', '4320p (8K)'
   ];
 
-  // শর্টস ভিডিওর জন্য অপশন
   const shortVideoOptions = [
-      'Anti Data Saver Mode', 
-      'Low Video Quality', 
-      'Normal Video Quality', 
-      'High Video Quality 4k-8k'
+      'Anti Data Saver Mode', 'Low Video Quality', 'Normal Video Quality', 'High Video Quality 4k-8k'
   ];
 
   const handleMainQualitySelect = (res) => {
@@ -45,10 +48,7 @@ export default function SettingsScreen() {
     setTimeout(() => {
       global.appSettings.normalVideo = res; 
       setSelectedMainQuality(res);
-
-      // [NEW]: গ্লোবাল প্লেয়ারকে তৎক্ষণাৎ রিস্টার্ট হওয়ার নির্দেশ দেওয়া
       DeviceEventEmitter.emit('qualityChanged', res);
-
       setIsLoading(false); 
     }, 800);
   };
@@ -59,6 +59,18 @@ export default function SettingsScreen() {
       global.shortVideoQuality = res; 
       setSelectedShortQuality(res);
       setIsLoading(false); 
+    }, 800);
+  };
+
+  const handleLocationSelect = (path) => {
+    setIsLoading(true);
+    setTimeout(() => {
+      fetch(`${MY_API_SERVER}/api/set-download-location?path=${encodeURIComponent(path)}`)
+        .then(() => {
+          setSelectedLocation(path);
+          setIsLoading(false);
+        })
+        .catch(() => setIsLoading(false));
     }, 800);
   };
 
@@ -91,9 +103,7 @@ export default function SettingsScreen() {
           {isMainQualityExpanded && (
             <View style={styles.radioGroup}>
               {longVideoOptions.map((opt, index) => (
-                <QualityRadioOption 
-                  key={index} label={opt} selected={selectedMainQuality === opt} onPress={() => handleMainQualitySelect(opt)}
-                />
+                <QualityRadioOption key={index} label={opt} selected={selectedMainQuality === opt} onPress={() => handleMainQualitySelect(opt)} />
               ))}
             </View>
           )}
@@ -105,9 +115,20 @@ export default function SettingsScreen() {
           {isShortQualityExpanded && (
             <View style={styles.radioGroup}>
               {shortVideoOptions.map((opt, index) => (
-                <QualityRadioOption 
-                  key={index} label={opt} selected={selectedShortQuality === opt} onPress={() => handleShortQualitySelect(opt)}
-                />
+                <QualityRadioOption key={index} label={opt} selected={selectedShortQuality === opt} onPress={() => handleShortQualitySelect(opt)} />
+              ))}
+            </View>
+          )}
+
+          {/* [NEW]: Download Location Menu */}
+          <ExpandableMenu 
+            icon="folder-open-outline" label="Download Location" 
+            expanded={isLocationExpanded} onPress={() => setIsLocationExpanded(!isLocationExpanded)} 
+          />
+          {isLocationExpanded && (
+            <View style={styles.radioGroup}>
+              {downloadLocations.map((loc, index) => (
+                <QualityRadioOption key={index} label={loc.label} selected={selectedLocation === loc.path} onPress={() => handleLocationSelect(loc.path)} />
               ))}
             </View>
           )}
@@ -119,7 +140,7 @@ export default function SettingsScreen() {
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#FF0000" />
-            <Text style={styles.loadingText}>Applying Quality...</Text>
+            <Text style={styles.loadingText}>Applying Settings...</Text>
           </View>
         </View>
       )}
