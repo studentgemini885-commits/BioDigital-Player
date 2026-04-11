@@ -29,31 +29,33 @@ export default function DownloadScreen({ navigation }) {
             const data = await res.json();
             const active = data.activeDownloads || {};
 
-            let stored = await AsyncStorage.getItem('recorded_downloads');
-            stored = stored ? JSON.parse(stored) : [];
-            let needsSave = false;
-
-            stored = stored.map(item => {
-                if (active[item.id]) {
-                    if (active[item.id].status === 'completed') {
-                        item.progress = 100;
-                        item.isCompleted = true;
-                        item.localUri = active[item.id].localUrl;
-                        needsSave = true;
-                        fetch(`${MY_API_SERVER}/api/clear-progress?id=${item.id}`); 
-                    } else if (active[item.id].status === 'error') {
-                        item.isError = true;
-                        needsSave = true;
-                    } else {
-                        item.progress = active[item.id].progress;
+            setDownloads(prevDownloads => {
+                let needsSave = false;
+                const updatedList = prevDownloads.map(item => {
+                    if (active[item.id]) {
+                        const activeItem = active[item.id];
+                        if (activeItem.status === 'completed' && !item.isCompleted) {
+                            item.progress = 100;
+                            item.isCompleted = true;
+                            item.localUri = activeItem.localUrl;
+                            needsSave = true;
+                            fetch(`${MY_API_SERVER}/api/clear-progress?id=${item.id}`); 
+                        } else if (activeItem.status === 'error' && !item.isError) {
+                            item.isError = true;
+                            needsSave = true;
+                        } else if (item.progress !== activeItem.progress) {
+                            item.progress = activeItem.progress;
+                            needsSave = true;
+                        }
                     }
+                    return { ...item }; // UI তে লাইভ আপডেট দেখানোর জন্য নতুন অবজেক্ট রেফারেন্স
+                });
+
+                if (needsSave) {
+                    AsyncStorage.setItem('recorded_downloads', JSON.stringify(updatedList));
                 }
-                return item;
+                return updatedList;
             });
-
-            if (needsSave) await AsyncStorage.setItem('recorded_downloads', JSON.stringify(stored));
-            setDownloads(stored);
-
         } catch(e) {}
     }, 1000); 
 
@@ -72,7 +74,22 @@ export default function DownloadScreen({ navigation }) {
     ]);
   };
 
-  // [FIX]: প্লেয়ার স্ক্রিনে ফাইলের type (অডিও/ভিডিও) পাঠানো হচ্ছে
+  // [NEW]: চলমান ডাউনলোড বাতিল করার ফাংশন
+  const cancelActiveDownload = async (id) => {
+    Alert.alert("ডাউনলোড বাতিল", "আপনি কি এই চলমান ডাউনলোডটি বাতিল করতে চান?", [
+      { text: "না", style: "cancel" },
+      { text: "হ্যাঁ", onPress: async () => {
+          try {
+             await fetch(`${MY_API_SERVER}/api/cancel-download?id=${id}`);
+             const newList = downloads.filter(item => item.id !== id);
+             setDownloads(newList);
+             await AsyncStorage.setItem('recorded_downloads', JSON.stringify(newList));
+          } catch(e) {}
+        }
+      }
+    ]);
+  };
+
   const handlePlayVideo = (item) => {
     if (!item.isCompleted) return;
     try {
@@ -84,7 +101,7 @@ export default function DownloadScreen({ navigation }) {
           channel: 'Downloaded File', 
           thumbnail: item.thumbnail, 
           localUri: item.localUri,
-          type: item.type // অডিও/ভিডিও ডিটেক্ট করার জন্য
+          type: item.type 
         }
       });
     } catch (error) { console.error("Playback System Error:", error); }
@@ -103,6 +120,10 @@ export default function DownloadScreen({ navigation }) {
           <View style={[styles.progressBarFill, { width: `${item.progress || 0}%` }]} />
         </View>
       </View>
+      {/* [NEW]: ডাউনলোড ক্যান্সেল বাটন */}
+      <TouchableOpacity style={styles.cancelBtn} onPress={() => cancelActiveDownload(item.id)}>
+        <Ionicons name="close-circle" size={28} color="#FF4444" />
+      </TouchableOpacity>
     </View>
   );
 
@@ -166,13 +187,14 @@ const styles = StyleSheet.create({
   list: { padding: 10 },
   sectionTitle: { color: '#00BFA5', fontSize: 16, fontWeight: 'bold', marginBottom: 10, marginLeft: 5 },
   activeCard: { flexDirection: 'row', backgroundColor: '#1A1A1A', borderRadius: 10, padding: 10, marginBottom: 10, alignItems: 'center', borderColor: '#00BFA5', borderWidth: 1 },
+  cancelBtn: { paddingLeft: 10 },
   card: { flexDirection: 'row', backgroundColor: '#1A1A1A', borderRadius: 10, marginBottom: 12, overflow: 'hidden', alignItems: 'center' },
   cardMain: { flex: 1, flexDirection: 'row', padding: 10 },
   thumb: { width: 120, height: 68, borderRadius: 6, backgroundColor: '#333' },
   info: { flex: 1, marginLeft: 12, justifyContent: 'center' },
   title: { color: '#FFF', fontSize: 14, fontWeight: '500', marginBottom: 4 },
   meta: { color: '#AAA', fontSize: 12, marginBottom: 5 },
-  progressBarBg: { height: 4, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden', width: '100%' },
+  progressBarBg: { height: 4, backgroundColor: '#333', borderRadius: 2, overflow: 'hidden', width: '100%', marginTop: 5 },
   progressBarFill: { height: '100%', backgroundColor: '#00BFA5' },
   deleteBtn: { padding: 15 },
   divider: { height: 1, backgroundColor: '#333', marginVertical: 10 },
