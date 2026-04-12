@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, SafeAreaView
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
-import { DeviceEventEmitter } from 'react-native';
 
 const MY_API_SERVER = "http://127.0.0.1:10000";
 
@@ -31,24 +30,36 @@ export default function DownloadScreen({ navigation }) {
 
             setDownloads(prevDownloads => {
                 let needsSave = false;
-                const updatedList = prevDownloads.map(item => {
-                    if (active[item.id]) {
-                        const activeItem = active[item.id];
+                let updatedList = [...prevDownloads];
+
+                Object.keys(active).forEach(id => {
+                    const activeItem = active[id];
+                    const existsIndex = updatedList.findIndex(d => d.id === id);
+
+                    // [FIX]: নতুন ডাউনলোড শুরু হলে লিস্টে যুক্ত করা হচ্ছে
+                    if (existsIndex === -1 && activeItem.status !== 'error') {
+                        updatedList.unshift({
+                            id: activeItem.id, videoId: activeItem.videoId, title: activeItem.title, 
+                            thumbnail: activeItem.thumbnail, quality: activeItem.quality, type: activeItem.type, 
+                            date: activeItem.date, progress: activeItem.progress, 
+                            isCompleted: activeItem.status === 'completed', localUri: activeItem.localUrl || null
+                        });
+                        needsSave = true;
+                    } else if (existsIndex !== -1) {
+                        const item = updatedList[existsIndex];
                         if (activeItem.status === 'completed' && !item.isCompleted) {
                             item.progress = 100;
                             item.isCompleted = true;
                             item.localUri = activeItem.localUrl;
                             needsSave = true;
-                            fetch(`${MY_API_SERVER}/api/clear-progress?id=${item.id}`); 
+                            fetch(`${MY_API_SERVER}/api/clear-progress?id=${id}`); 
                         } else if (activeItem.status === 'error' && !item.isError) {
                             item.isError = true;
                             needsSave = true;
                         } else if (item.progress !== activeItem.progress) {
                             item.progress = activeItem.progress;
-                            needsSave = true;
                         }
                     }
-                    return { ...item }; // UI তে লাইভ আপডেট দেখানোর জন্য নতুন অবজেক্ট রেফারেন্স
                 });
 
                 if (needsSave) {
@@ -74,7 +85,6 @@ export default function DownloadScreen({ navigation }) {
     ]);
   };
 
-  // [NEW]: চলমান ডাউনলোড বাতিল করার ফাংশন
   const cancelActiveDownload = async (id) => {
     Alert.alert("ডাউনলোড বাতিল", "আপনি কি এই চলমান ডাউনলোডটি বাতিল করতে চান?", [
       { text: "না", style: "cancel" },
@@ -95,16 +105,9 @@ export default function DownloadScreen({ navigation }) {
     try {
       navigation.navigate('Player', {
         videoId: item.videoId,
-        videoData: {
-          id: item.videoId, 
-          title: item.title, 
-          channel: 'Downloaded File', 
-          thumbnail: item.thumbnail, 
-          localUri: item.localUri,
-          type: item.type 
-        }
+        videoData: { id: item.videoId, title: item.title, channel: 'Downloaded File', thumbnail: item.thumbnail, localUri: item.localUri, type: item.type }
       });
-    } catch (error) { console.error("Playback System Error:", error); }
+    } catch (error) {}
   };
 
   const activeDownloads = downloads.filter(d => !d.isCompleted && !d.isError);
@@ -120,7 +123,6 @@ export default function DownloadScreen({ navigation }) {
           <View style={[styles.progressBarFill, { width: `${item.progress || 0}%` }]} />
         </View>
       </View>
-      {/* [NEW]: ডাউনলোড ক্যান্সেল বাটন */}
       <TouchableOpacity style={styles.cancelBtn} onPress={() => cancelActiveDownload(item.id)}>
         <Ionicons name="close-circle" size={28} color="#FF4444" />
       </TouchableOpacity>
