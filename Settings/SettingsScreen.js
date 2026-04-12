@@ -2,10 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { DeviceEventEmitter } from 'react-native'; 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 global.appSettings = global.appSettings || {};
 global.appSettings.normalVideo = global.appSettings.normalVideo || 'Auto'; 
 global.shortVideoQuality = global.shortVideoQuality || 'Normal Video Quality';
+global.appSettings.downloadLocation = global.appSettings.downloadLocation || '/storage/emulated/0/MyTube';
+
+// [NEW]: শর্টস ক্যাশ লিমিটের জন্য গ্লোবাল ভেরিয়েবল (ডিফল্ট: 1 ঘন্টা = 3600000 মিলিসেকেন্ড)
+global.appSettings.shortsCacheLimit = global.appSettings.shortsCacheLimit || 3600000;
 
 const MY_API_SERVER = "http://127.0.0.1:10000";
 
@@ -16,14 +21,16 @@ export default function SettingsScreen() {
   const [isShortQualityExpanded, setIsShortQualityExpanded] = useState(false);
   const [selectedShortQuality, setSelectedShortQuality] = useState(global.shortVideoQuality);
 
-  // [NEW]: Download Location State
   const [isLocationExpanded, setIsLocationExpanded] = useState(false);
   const [downloadLocations, setDownloadLocations] = useState([{ label: 'Phone Memory', path: '/storage/emulated/0/MyTube' }]);
-  const [selectedLocation, setSelectedLocation] = useState('/storage/emulated/0/MyTube');
+  const [selectedLocation, setSelectedLocation] = useState(global.appSettings.downloadLocation);
+
+  // [NEW]: ক্যাশ লিমিট স্টেট
+  const [isCacheLimitExpanded, setIsCacheLimitExpanded] = useState(false);
+  const [selectedCacheLimit, setSelectedCacheLimit] = useState(global.appSettings.shortsCacheLimit);
 
   const [isLoading, setIsLoading] = useState(false);
 
-  // সার্ভার থেকে মেমোরি কার্ড (SD Card) ডিটেক্ট করা
   useEffect(() => {
     fetch(`${MY_API_SERVER}/api/storage-info`)
       .then(res => res.json())
@@ -41,6 +48,17 @@ export default function SettingsScreen() {
 
   const shortVideoOptions = [
       'Anti Data Saver Mode', 'Low Video Quality', 'Normal Video Quality', 'High Video Quality 4k-8k'
+  ];
+
+  // [NEW]: ক্যাশ লিমিটের অপশনসমূহ (মিলিসেকেন্ডে)
+  const cacheLimitOptions = [
+      { label: '30 Minutes', value: 1800000 },
+      { label: '1 Hour (Default)', value: 3600000 },
+      { label: '2 Hours', value: 7200000 },
+      { label: '3 Hours', value: 10800000 },
+      { label: '6 Hours', value: 21600000 },
+      { label: '12 Hours', value: 43200000 },
+      { label: '24 Hours', value: 86400000 }
   ];
 
   const handleMainQualitySelect = (res) => {
@@ -67,10 +85,21 @@ export default function SettingsScreen() {
     setTimeout(() => {
       fetch(`${MY_API_SERVER}/api/set-download-location?path=${encodeURIComponent(path)}`)
         .then(() => {
+          global.appSettings.downloadLocation = path;
           setSelectedLocation(path);
           setIsLoading(false);
         })
         .catch(() => setIsLoading(false));
+    }, 800);
+  };
+
+  // [NEW]: ক্যাশ টাইম সেভ করার ফাংশন
+  const handleCacheLimitSelect = (val) => {
+    setIsLoading(true);
+    setTimeout(() => {
+      global.appSettings.shortsCacheLimit = val;
+      setSelectedCacheLimit(val);
+      setIsLoading(false);
     }, 800);
   };
 
@@ -120,7 +149,6 @@ export default function SettingsScreen() {
             </View>
           )}
 
-          {/* [NEW]: Download Location Menu */}
           <ExpandableMenu 
             icon="folder-open-outline" label="Download Location" 
             expanded={isLocationExpanded} onPress={() => setIsLocationExpanded(!isLocationExpanded)} 
@@ -129,6 +157,19 @@ export default function SettingsScreen() {
             <View style={styles.radioGroup}>
               {downloadLocations.map((loc, index) => (
                 <QualityRadioOption key={index} label={loc.label} selected={selectedLocation === loc.path} onPress={() => handleLocationSelect(loc.path)} />
+              ))}
+            </View>
+          )}
+
+          {/* [NEW]: ক্যাশ লিমিট মেনু */}
+          <ExpandableMenu 
+            icon="time-outline" label="Shorts Video Cache Limit Time" 
+            expanded={isCacheLimitExpanded} onPress={() => setIsCacheLimitExpanded(!isCacheLimitExpanded)} 
+          />
+          {isCacheLimitExpanded && (
+            <View style={styles.radioGroup}>
+              {cacheLimitOptions.map((opt, index) => (
+                <QualityRadioOption key={index} label={opt.label} selected={selectedCacheLimit === opt.value} onPress={() => handleCacheLimitSelect(opt.value)} />
               ))}
             </View>
           )}
