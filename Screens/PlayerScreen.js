@@ -75,7 +75,8 @@ export default function PlayerScreen({ route, navigation }) {
       setTimeout(() => setIsDownloading(false), 2000);
 
       const downloadId = Date.now().toString(); 
-      const safeTitle = (videoData.title || 'video').replace(/[^a-zA-Z0-9]/g, '_');
+      // [FIXED]: অরিজিনাল নাম ঠিক রাখার জন্য লজিক আপডেট করা হয়েছে (স্পেস এবং বাংলা ঠিক থাকবে)
+      const safeTitle = (videoData.title || 'video').replace(/[<>:"\/\\|?*]+/g, '').trim();
       const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
       
       const dlApiUrl = `${MY_API_SERVER}/api/aria-download?id=${downloadId}&url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(item.quality)}&type=${downloadType}&title=${encodeURIComponent(safeTitle)}`;
@@ -84,41 +85,7 @@ export default function PlayerScreen({ route, navigation }) {
       const resJson = await response.json();
 
       if (resJson.success) {
-          Alert.alert("ডাউনলোড শুরু হয়েছে", "ফাইলটি সার্ভারের মাধ্যমে MyTube ফোল্ডারে সেভ হচ্ছে।");
-
-          const progressInterval = setInterval(async () => {
-              try {
-                  const progRes = await fetch(`${MY_API_SERVER}/api/progress`);
-                  const progData = await progRes.json();
-                  
-                  if (progData.activeDownloads && progData.activeDownloads[downloadId]) {
-                      const dlInfo = progData.activeDownloads[downloadId];
-                      DeviceEventEmitter.emit('live_download_progress', {
-                          id: downloadId, title: videoData.title, thumbnail: videoData.thumbnail,
-                          quality: item.quality, type: downloadType, progress: dlInfo.progress
-                      });
-
-                      if (dlInfo.status === 'completed') {
-                          clearInterval(progressInterval);
-                          const existingDownloads = await AsyncStorage.getItem('recorded_downloads');
-                          let downloadList = existingDownloads ? JSON.parse(existingDownloads) : [];
-                          downloadList.unshift({ 
-                              id: downloadId, videoId, title: videoData.title, thumbnail: videoData.thumbnail, 
-                              quality: item.quality, type: downloadType, localUri: dlInfo.localUrl, 
-                              isCompleted: true, date: new Date().toLocaleDateString() 
-                          });
-                          await AsyncStorage.setItem('recorded_downloads', JSON.stringify(downloadList));
-                          DeviceEventEmitter.emit('live_download_complete', { id: downloadId });
-                          fetch(`${MY_API_SERVER}/api/clear-progress?id=${downloadId}`);
-                          Alert.alert("সম্পন্ন", "ডাউনলোড সফলভাবে সম্পন্ন হয়েছে।");
-                      } else if (dlInfo.status === 'error') {
-                          clearInterval(progressInterval);
-                          DeviceEventEmitter.emit('live_download_complete', { id: 'error' });
-                          Alert.alert("ত্রুটি", "ডাউনলোড ব্যর্থ হয়েছে।");
-                      }
-                  }
-              } catch(e) {}
-          }, 1000);
+          Alert.alert("ডাউনলোড শুরু হয়েছে", "ফাইলটি সার্ভারের মাধ্যমে সেভ হচ্ছে।");
       }
     } catch (error) {
       Alert.alert("সার্ভার এরর", "সার্ভারের সাথে কানেক্ট করা যায়নি।");
