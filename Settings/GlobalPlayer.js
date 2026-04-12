@@ -27,7 +27,6 @@ export default function GlobalPlayer() {
   const syncAudioRef = useRef(new Audio.Sound()); 
   
   const seekPosRef = useRef(0);
-
   const currentVideoIdRef = useRef(null);
   const isLocalRef = useRef(false);
   const isAudioModeRef = useRef(false); 
@@ -48,7 +47,9 @@ export default function GlobalPlayer() {
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
 
+  // [FIX]: অফলাইন ফাইল সবসময় Combined/Muxed মোডে প্লে হবে
   const checkIsMuxed = () => {
+      if (isLocalRef.current) return true; 
       global.appSettings = global.appSettings || {};
       const currentQNum = parseInt(getNumericQuality(global.appSettings.normalVideo || '720'));
       return [360, 480, 720].includes(currentQNum) || streamMode === 'combined';
@@ -62,10 +63,9 @@ export default function GlobalPlayer() {
             shouldDuckAndroid: true,
             playThroughEarpieceAndroid: false,
         });
-    } catch (e) { console.log(e); }
+    } catch (e) {}
   };
 
-  // [FIXED]: আপনার অরিজিনাল API URL (/api/extract) ফিরিয়ে আনা হয়েছে
   const fetchStreamUrl = async (vidId, targetQuality) => {
     try {
       const numQ = getNumericQuality(targetQuality);
@@ -86,7 +86,7 @@ export default function GlobalPlayer() {
                       { uri: json.audioUrl },
                       { shouldPlay: true, positionMillis: seekPosRef.current, progressUpdateIntervalMillis: 100 }
                   );
-              } catch(e) { console.log(e); }
+              } catch(e) {}
           } else {
               try { await syncAudioRef.current.unloadAsync(); } catch(e){}
           }
@@ -126,41 +126,38 @@ export default function GlobalPlayer() {
     }
   };
 
-  // [FIXED]: সুরক্ষিত এবং স্বাধীন Quality Listener
   useEffect(() => {
-    const qualitySub = DeviceEventEmitter.addListener('qualityChanged', async (newQuality) => {
-        global.appSettings = global.appSettings || {};
-        global.appSettings.normalVideo = newQuality;
-        setCurrentQuality(newQuality);
+    const unsubscribe = navigation.addListener('state', async () => {
+      const savedQuality = global.appSettings?.normalVideo || '720p';
+      if (savedQuality !== currentQuality && currentVideoIdRef.current && !isLocalRef.current) {
+          setCurrentQuality(savedQuality); 
+          
+          let currentPos = 0;
+          if (videoRef.current) {
+              try {
+                  const status = await videoRef.current.getStatusAsync();
+                  currentPos = status.positionMillis || 0;
+                  await videoRef.current.pauseAsync();
+              } catch(e){}
+          }
 
-        if (currentVideoIdRef.current && !isLocalRef.current) { 
-            let currentPos = 0;
-            if (videoRef.current) {
-                try {
-                    const status = await videoRef.current.getStatusAsync();
-                    currentPos = status.positionMillis || 0;
-                    await videoRef.current.pauseAsync();
-                } catch(e){}
-            }
-
-            seekPosRef.current = currentPos; 
-            setIsPlaying(false); 
-            setStreamUrl(null);  
-            setErrorMsg(null);
-            
-            if (audioRef.current) {
-                try { await audioRef.current.unloadAsync(); } catch(e){}
-                audioRef.current = null;
-            }
-            try { await syncAudioRef.current.unloadAsync(); } catch(e){}
-            
-            setVideoKey(Date.now().toString()); 
-            await fetchStreamUrl(currentVideoIdRef.current, newQuality);
-        }
+          seekPosRef.current = currentPos;
+          setIsPlaying(false); 
+          setStreamUrl(null);  
+          setErrorMsg(null);
+          
+          if (audioRef.current) {
+              try { await audioRef.current.unloadAsync(); } catch(e){}
+              audioRef.current = null;
+          }
+          try { await syncAudioRef.current.unloadAsync(); } catch(e){}
+          
+          setVideoKey(Date.now().toString()); 
+          await fetchStreamUrl(currentVideoIdRef.current, savedQuality);
+      }
     });
-
-    return () => { qualitySub.remove(); };
-  }, []);
+    return unsubscribe;
+  }, [navigation, currentQuality]);
 
   useEffect(() => {
     const switchToAudioMode = async () => {
@@ -173,7 +170,6 @@ export default function GlobalPlayer() {
             const isMuxed = checkIsMuxed();
 
             if (isMuxed) {
-                // [FIX 1]: Muxed ভিডিওর ক্ষেত্রে ভিডিও চলবে কিন্তু ব্যাকগ্রাউন্ডে। 
                 if (videoRef.current) {
                     try { await videoRef.current.playAsync(); } catch(e){}
                 }
@@ -194,7 +190,6 @@ export default function GlobalPlayer() {
                 let targetAudioUrl = null; 
                 if (!isLocalRef.current && currentVideoIdRef.current) {
                     try {
-                        // [FIXED]: এখানেও আপনার অরিজিনাল API URL দেওয়া হয়েছে
                         const apiUrl = `${MY_API_SERVER}/api/extract?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${currentVideoIdRef.current}`)}&quality=240&merge=true&type=audio&t=${Date.now()}`;
                         const res = await fetch(apiUrl);
                         const json = await res.json();
@@ -238,7 +233,6 @@ export default function GlobalPlayer() {
 
             let currentPos = 0;
             
-            // [FIX 2]: Promise.all সরিয়ে নিরাপদ try/catch ব্লক
             if (audioRef.current) {
                 try {
                     const status = await audioRef.current.getStatusAsync();
@@ -303,6 +297,7 @@ export default function GlobalPlayer() {
       pan.setValue({ x: 0, y: 0 });
 
       if (isLocalRef.current) {
+          setStreamMode('combined'); // অফলাইন ভিডিওর জন্য
           setStreamUrl(data.videoData.localUri);
           setAudioStreamUrl(data.videoData.localUri);
           return;
@@ -367,8 +362,12 @@ export default function GlobalPlayer() {
   if (playerState === 'hidden') return null;
   const isFull = playerState === 'full';
   
-  const isCurrentlyMuxed = [360, 480, 720].includes(parseInt(getNumericQuality(global.appSettings.normalVideo || '720'))) || streamMode === 'combined';
+  const isCurrentlyMuxed = checkIsMuxed();
   const shouldVideoPlay = isPlaying && (!isAudioMode || isCurrentlyMuxed);
+
+  // [FIX]: অফলাইন অডিওর জন্য ভিডিও ভিউ হাইড করা হবে না, যাতে কন্ট্রোল প্যানেল কাজ করে
+  const hideVideo = isAudioMode && !isLocalRef.current;
+  const showCustomPoster = isAudioMode && !isLocalRef.current;
 
   return (
      <Animated.View 
@@ -386,8 +385,7 @@ export default function GlobalPlayer() {
                       </Text>
                   </View>
                ) : streamUrl ? (
-                  /* [UI FIX]: Muxed ভিডিওর ব্যাকগ্রাউন্ড অডিওর জন্য opacity: 0 */
-                  <View style={[styles.videoCoreWrapper, isAudioMode && styles.hiddenVideoStyle]}>
+                  <View style={[styles.videoCoreWrapper, hideVideo && styles.hiddenVideoStyle]}>
                     <Video 
                       key={videoKey} 
                       ref={videoRef} 
@@ -395,7 +393,13 @@ export default function GlobalPlayer() {
                       style={styles.video} 
                       shouldPlay={shouldVideoPlay} 
                       isMuted={streamMode === 'separate'} 
-                      useNativeControls={isFull && !isAudioMode} 
+                      
+                      // [FIX]: অফলাইন অডিওতেও কন্ট্রোল প্যানেল এবং পোস্টার দেখানো হবে
+                      useNativeControls={isFull && (!isAudioMode || isLocalRef.current)} 
+                      usePoster={isAudioMode && isLocalRef.current}
+                      posterSource={{ uri: videoData?.thumbnail }}
+                      posterStyle={{ resizeMode: 'cover' }}
+
                       resizeMode={isFull ? "contain" : "cover"} 
                       progressUpdateIntervalMillis={500}
                       onPlaybackStatusUpdate={handlePlaybackStatusUpdate} 
@@ -411,7 +415,7 @@ export default function GlobalPlayer() {
                   </View>
                )}
 
-               {isAudioMode && (
+               {showCustomPoster && (
                   <View style={styles.audioPosterContainer}>
                     <Image source={{ uri: videoData?.thumbnail }} style={styles.audioPosterBg} blurRadius={isFull ? 15 : 5} />
                     <View style={styles.audioPosterOverlay}>
