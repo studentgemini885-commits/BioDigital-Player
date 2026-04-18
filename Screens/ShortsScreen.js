@@ -255,3 +255,261 @@ export default function ShortsScreen({ initialVideoId, route }) {
     }
   }).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+const shortsInjectScript = `
+    (function() {
+        const style = document.createElement('style');
+        style.innerHTML = \`
+            ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, header, .ytm-bottom-sheet { display: none !important; }
+            ytm-ad-slot-renderer, ytm-promoted-sparkles-web-renderer, .ad-showing, .ad-interrupting, [is-ad], ytm-companion-ad-renderer { display: none !important; opacity: 0 !important; pointer-events: none !important; }
+            .reel-player-header-subscribe-button, .ytm-subscribe-button-renderer { opacity: 0 !important; pointer-events: none !important; display: none !important; }
+        \`;
+        document.head.appendChild(style);
+        
+        let activeVideoId = "";
+
+        setInterval(() => {
+            let activeReel = document.querySelector('ytm-reel-video-renderer[is-active]');
+            if (!activeReel) {
+                const reelsList = document.querySelectorAll('ytm-reel-video-renderer');
+                for (let i = 0; i < reelsList.length; i++) {
+                    const rect = reelsList[i].getBoundingClientRect();
+                    if (rect.top > -200 && rect.top < window.innerHeight / 2) {
+                        activeReel = reelsList[i];
+                        break;
+                    }
+                }
+            }
+
+            if (activeReel) {
+                const vid = activeReel.querySelector('video');
+                const uniqueId = activeReel.id || (vid ? vid.src : "");
+                
+                var channelName = '';
+                var linkElem = activeReel.querySelector('a[href^="/@"]');
+                if (linkElem) {
+                    var hrefVal = linkElem.getAttribute('href');
+                    channelName = hrefVal.split('?')[0].replace('/', ''); 
+                } else {
+                    var textElements = activeReel.querySelectorAll('.yt-core-attributed-string, .reel-channel-name, .ytm-reel-channel-renderer span, h2');
+                    for (var k = 0; k < textElements.length; k++) {
+                        var txt = textElements[k].innerText ? textElements[k].innerText.trim() : '';
+                        if (txt.length > 0 && txt !== 'Subscribe' && txt !== 'সাবস্ক্রাইব') {
+                            channelName = txt;
+                            break;
+                        }
+                    }
+                }
+
+                let vId = "";
+                const match = window.location.href.match(/\\/shorts\\/([a-zA-Z0-9_-]+)/);
+                if(match && match[1]) {
+                    vId = match[1];
+                }
+
+                if (uniqueId && uniqueId !== activeVideoId) {
+                    activeVideoId = uniqueId;
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ 
+                        type: 'NEW_VIDEO_STARTED',
+                        url: window.location.href,
+                        videoId: vId,
+                        channel: channelName
+                    }));
+                }
+
+                if(channelName && channelName !== '') {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'CHANNEL_SYNC', name: channelName }));
+                }
+            }
+
+            const skipBtn = document.querySelector('.ytp-ad-skip-button') || document.querySelector('.ytp-skip-ad-button');
+            if (skipBtn) skipBtn.click();
+            
+            const adShowing = document.querySelector('.ad-showing');
+            const vidElement = document.querySelector('video');
+            if (adShowing && vidElement) vidElement.playbackRate = 16.0;
+
+            const reels = document.querySelectorAll('ytm-reel-video-renderer');
+            for (let i = 0; i < reels.length; i++) {
+                const reel = reels[i];
+                const textContent = reel.innerText || reel.textContent || "";
+                const hasAdBadge = reel.querySelector('ytm-ad-slot-renderer, [is-ad], .brand-info') !== null;
+                const hasAdKeyword = /sponsored|প্রযোজিত|ad|promoted|advertisement/i.test(textContent.toLowerCase());
+
+                if (hasAdBadge || hasAdKeyword) {
+                    const rect = reel.getBoundingClientRect();
+                    if (rect.top > -200 && rect.top < window.innerHeight) {
+                        window.ReactNativeWebView.postMessage('SKIP_START');
+                        const v = reel.querySelector('video');
+                        if (v) { v.src = ''; v.remove(); }
+                        reel.style.opacity = '0';
+                        reel.style.display = 'none';
+                        const nextReel = reels[i + 1];
+                        if (nextReel) nextReel.scrollIntoView({ behavior: 'auto', block: 'start' });
+                        setTimeout(() => { reel.remove(); window.ReactNativeWebView.postMessage('SKIP_END'); }, 300);
+                    }
+                }
+            }
+        }, 250); 
+    })();
+    true;
+  `;
+
+  if (isOffline) {
+      return (
+          <SafeAreaView style={styles.container}>
+              <View style={styles.offlineHeader}>
+                  <TouchableOpacity onPress={() => { setIsOffline(false); navigation.goBack(); }} style={styles.headerIconBtn}>
+                      <Ionicons name="arrow-back" size={28} color="#FFF" />
+                  </TouchableOpacity>
+                  <Text style={styles.offlineHeaderText}>Offline Shorts</Text>
+              </View>
+
+              {cachedShorts.length > 0 ? (
+                  <FlatList
+                      data={cachedShorts}
+                      keyExtractor={item => item.id}
+                      pagingEnabled
+                      showsVerticalScrollIndicator={false}
+                      onViewableItemsChanged={onViewableItemsChanged}
+                      viewabilityConfig={viewabilityConfig}
+                      renderItem={({item, index}) => (
+                          <View style={{ width: width, height: height }}>
+                              <Video 
+                                  source={{ uri: item.uri }} 
+                                  style={StyleSheet.absoluteFill} 
+                                  shouldPlay={index === visibleIndex && isFocused} 
+                                  isLooping 
+                                  resizeMode="cover" 
+                                  useNativeControls={false}
+                              />
+                              <View style={styles.offlineActionRow}>
+                                  <Text style={styles.offlineChannelName}>@{item.channel || 'Shorts'}</Text>
+                                  <View style={styles.offlineBadge}>
+                                      <Ionicons name="cloud-offline" size={14} color="#FFF" />
+                                      <Text style={styles.offlineBadgeText}>Cached Video</Text>
+                                  </View>
+                              </View>
+                          </View>
+                      )}
+                  />
+              ) : (
+                  <View style={styles.offlineEmpty}>
+                      <Ionicons name="wifi-outline" size={80} color="#444" />
+                      <Text style={styles.offlineEmptyText}>আপনি এখন অফলাইনে আছেন</Text>
+                      <Text style={styles.offlineEmptySub}>ইন্টারনেট সংযোগ চালু করে আবার চেষ্টা করুন</Text>
+                      <TouchableOpacity style={styles.retryBtn} onPress={() => {
+                          checkAndLoadCache();
+                          setIsOffline(false);
+                      }}>
+                          <Text style={styles.retryText}>রিলোড করুন</Text>
+                      </TouchableOpacity>
+                  </View>
+              )}
+          </SafeAreaView>
+      );
+  }
+
+  return (
+    <View style={styles.container}>
+      <WebView
+        ref={shortsWebViewRef} 
+        source={{ uri: targetUri }} 
+        userAgent={STABLE_USER_AGENT} 
+        injectedJavaScript={shortsInjectScript} 
+        onMessage={onShortsMessage} 
+        onLoadEnd={() => setShortsLoading(false)} 
+        javaScriptEnabled={true} 
+
+        onError={(e) => {
+            if (e.nativeEvent.code === -2 || String(e.nativeEvent.description).includes('DISCONNECTED')) {
+                setIsOffline(true);
+                checkAndLoadCache(); 
+            }
+        }}
+
+        cacheEnabled={true}
+        cacheMode="LOAD_CACHE_ELSE_NETWORK"
+        domStorageEnabled={true}
+        onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
+        containerStyle={{ flex: 1 }} 
+      />
+      
+      <View style={styles.bottomLayer} {...panResponder.panHandlers} />
+      <View style={styles.rightMiddleLayer} {...panResponder.panHandlers} />
+      <View style={styles.topRightLayer} {...panResponder.panHandlers} />
+      <View style={styles.topLeftLayer} {...panResponder.panHandlers} />
+
+      {showActionBtns && currentChannel.name !== '' && currentChannel.name !== 'Unknown Channel' && (
+        <View style={styles.actionRowContainer} pointerEvents="box-none">
+            <TouchableOpacity 
+              style={[styles.nativeSubBtn, currentChannel.isSubscribed && styles.nativeSubbedBtn]} 
+              onPress={handleNativeSubscribe} activeOpacity={0.8}
+            >
+              <Text style={[styles.nativeSubText, currentChannel.isSubscribed && styles.nativeSubbedText]}>
+                {currentChannel.isSubscribed ? 'Subscribed' : 'Subscribe'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.nativeShareBtn} onPress={handleShare} activeOpacity={0.8}>
+              <Ionicons name="arrow-redo-outline" size={18} color="#FFF" />
+              <Text style={styles.nativeShareText}>Share</Text>
+            </TouchableOpacity>
+        </View>
+      )}
+
+      {showUnmuteBtn && (
+        <TouchableOpacity activeOpacity={0.8} style={styles.unmuteBadge} onPress={handleUnmutePress}>
+          <Ionicons name="volume-mute" size={18} color="#FFF" />
+          <Text style={styles.unmuteText}>Unmute</Text>
+        </TouchableOpacity>
+      )}
+
+      {isAutoSkipping && (
+        <View style={styles.skipOverlay}>
+          <ActivityIndicator size="large" color="#FF0000" />
+          <Text style={styles.skipText}>অ্যাড ফিল্টার হচ্ছে...</Text>
+        </View>
+      )}
+      
+      {shortsLoading && !isAutoSkipping && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#FF0000" />
+        </View>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+  skipOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  skipText: { color: '#FFF', marginTop: 15, fontWeight: 'bold' },
+  
+  bottomLayer: { position: 'absolute', bottom: 0, left: 0, width: '100%', height: height / 3, backgroundColor: 'transparent', zIndex: 5 },
+  rightMiddleLayer: { position: 'absolute', top: height / 4, right: 0, width: width / 4, height: height / 2, backgroundColor: 'transparent', zIndex: 5 },
+  topRightLayer: { position: 'absolute', top: 0, right: 0, width: width / 4, height: height / 10, backgroundColor: 'transparent', zIndex: 5 },
+  topLeftLayer: { position: 'absolute', top: 0, left: 0, width: width / 2, height: height / 8, backgroundColor: 'transparent', zIndex: 5 },
+  
+  actionRowContainer: { position: 'absolute', bottom: height / 5, left: 15, flexDirection: 'row', alignItems: 'center', zIndex: 99999, elevation: 100 },
+  nativeSubBtn: { backgroundColor: '#FF0000', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  nativeSubbedBtn: { backgroundColor: '#333', borderColor: '#555' },
+  nativeSubText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
+  nativeSubbedText: { color: '#AAA' },
+  nativeShareBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 15, paddingVertical: 10, borderRadius: 25, marginLeft: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  nativeShareText: { color: '#FFF', fontWeight: 'bold', fontSize: 13, marginLeft: 6 },
+  unmuteBadge: { position: 'absolute', top: 50, right: 15, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 0, 0, 0.8)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', zIndex: 99999 },
+
+  offlineHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, position: 'absolute', top: 0, zIndex: 10, width: '100%', backgroundColor: 'rgba(0,0,0,0.4)' },
+  headerIconBtn: { paddingRight: 10 },
+  offlineHeaderText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  offlineActionRow: { position: 'absolute', bottom: 100, left: 15 },
+  offlineChannelName: { color: '#FFF', fontSize: 18, fontWeight: 'bold', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 1, height: 1}, textShadowRadius: 3 },
+  offlineBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,191,165,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginTop: 8, alignSelf: 'flex-start' },
+  offlineBadgeText: { color: '#FFF', fontSize: 11, fontWeight: 'bold', marginLeft: 4 },
+  offlineEmpty: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F0F0F' },
+  offlineEmptyText: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginTop: 15 },
+  offlineEmptySub: { color: '#888', fontSize: 14, marginTop: 5, marginBottom: 20 },
+  retryBtn: { backgroundColor: '#00BFA5', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 25 },
+  retryText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
+});
