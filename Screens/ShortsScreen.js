@@ -5,11 +5,11 @@ import { useNavigation, useIsFocused, useFocusEffect } from '@react-navigation/n
 import { Video } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
-import * as FileSystem from 'expo-file-system'; 
 
 const { width, height } = Dimensions.get('window');
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
-const TEMP_CACHE_LIMIT = 43200000; 
+// [FIXED]: ক্যাশ টাইম ২৪ ঘণ্টা করা হলো (২৪ * ৬০ * ৬০ * ১০০০ মিলিসেকেন্ড)
+const TEMP_CACHE_LIMIT = 86400000; 
 
 export default function ShortsScreen({ initialVideoId, route }) {
   const navigation = useNavigation();
@@ -26,7 +26,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [customCount, setCustomCount] = useState('');
   
-  // লাইভ ডাউনলোড প্রোগ্রেস স্টেট
   const [isBulkDownloading, setIsBulkDownloading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
 
@@ -56,11 +55,11 @@ export default function ShortsScreen({ initialVideoId, route }) {
             }, 2000);
             return;
         }
-    } catch (e) { }
+    } catch (e) {}
     setIsLoadingMore(false);
   };
 
-  // [FIXED]: অফলাইন ফাইল চেক করার পদ্ধতি
+  // [FIXED]: Android Permission ইস্যু এড়াতে Server API ব্যবহার করা হলো
   const loadOfflineData = async () => {
     try {
         const now = Date.now();
@@ -72,22 +71,16 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
         const validTemp = [];
         for (const item of tempParsed) {
-            if (now - item.timestamp <= TEMP_CACHE_LIMIT) {
-                // ফাইলটি আসলেই মোবাইলে আছে কিনা চেক করা হচ্ছে
-                const fileInfo = await FileSystem.getInfoAsync(item.uri);
-                if(fileInfo.exists) validTemp.push(item);
+            // ২৪ ঘণ্টা পার হয়ে গেলে সার্ভারকে ডিলিট করতে বলবে
+            if (now - item.timestamp > TEMP_CACHE_LIMIT) {
+                fetch(`${MY_API_SERVER}/api/delete-short?id=${item.videoId}&type=temp`).catch(()=>{});
+            } else {
+                validTemp.push(item);
             }
         }
         if (validTemp.length !== tempParsed.length) await AsyncStorage.setItem('temp_cached_shorts', JSON.stringify(validTemp));
 
-        const validPerm = [];
-        for (const item of permParsed) {
-             const fileInfo = await FileSystem.getInfoAsync(item.uri);
-             if(fileInfo.exists) validPerm.push(item);
-        }
-        if (validPerm.length !== permParsed.length) await AsyncStorage.setItem('permanent_shorts', JSON.stringify(validPerm));
-
-        setMergedOfflineShorts([...validPerm, ...validTemp]);
+        setMergedOfflineShorts([...permParsed, ...validTemp]);
     } catch (e) {}
   };
 
@@ -123,7 +116,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
             parsed.push({ ...item, uri: data.localUrl, timestamp: Date.now() });
             if (parsed.length > 50) {
                 const removed = parsed.shift();
-                try { await FileSystem.deleteAsync(removed.uri, {idempotent: true}); } catch(e){}
+                fetch(`${MY_API_SERVER}/api/delete-short?id=${removed.videoId}&type=temp`).catch(()=>{});
             }
             await AsyncStorage.setItem('temp_cached_shorts', JSON.stringify(parsed));
         }
@@ -147,7 +140,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
-  // [FIXED]: লাইভ প্রোগ্রেস সহ রিয়েল সার্ভার ডাউনলোড
   const startBulkDownload = async (targetCount) => {
     if (!targetCount || isNaN(targetCount) || targetCount <= 0) return;
     setShowDownloadModal(false);
@@ -160,7 +152,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
     while (downloaded < targetCount) {
         try {
-            // লাইভ প্রোগ্রেস দেখানোর জন্য ১টি ১টি করে ডাউনলোড করা হচ্ছে
             const res = await fetch(`${MY_API_SERVER}/api/get-shorts?count=1`);
             const data = await res.json();
 
@@ -168,14 +159,13 @@ export default function ShortsScreen({ initialVideoId, route }) {
                 const item = data.shorts[0];
                 if (permParsed.some(s => s.videoId === item.videoId)) continue;
 
-                // সার্ভার পুরোপুরি ডাউনলোড শেষ করা পর্যন্ত অপেক্ষা করবে
                 const dlRes = await fetch(`${MY_API_SERVER}/api/download-short-bg?id=${item.videoId}&type=perm`);
                 const dlData = await dlRes.json();
                 
                 if (dlData.success && dlData.localUrl) {
                     permParsed.push({ ...item, uri: dlData.localUrl, isPermanent: true });
                     downloaded++;
-                    setBulkProgress({ current: downloaded, total: targetCount }); // UI আপডেট হবে
+                    setBulkProgress({ current: downloaded, total: targetCount });
                     await AsyncStorage.setItem('permanent_shorts', JSON.stringify(permParsed));
                 }
             } else {
@@ -194,22 +184,15 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   const clearDownloads = async (type) => {
       try {
+          // সার্ভারকে ডিলিট করার রিকোয়েস্ট পাঠানো হলো
+          await fetch(`${MY_API_SERVER}/api/delete-shorts-cache?type=${type}`);
+          
           if (type === 'perm') {
-              let permSaved = await AsyncStorage.getItem('permanent_shorts');
-              let permParsed = permSaved ? JSON.parse(permSaved) : [];
-              for(const item of permParsed) {
-                  try { await FileSystem.deleteAsync(item.uri, {idempotent: true}); } catch(e){}
-              }
               await AsyncStorage.removeItem('permanent_shorts');
               Alert.alert("সফল", "ডাউনলোড করা সব ভিডিও মুছে ফেলা হয়েছে।");
           } else {
-              let tempSaved = await AsyncStorage.getItem('temp_cached_shorts');
-              let tempParsed = tempSaved ? JSON.parse(tempSaved) : [];
-              for(const item of tempParsed) {
-                  try { await FileSystem.deleteAsync(item.uri, {idempotent: true}); } catch(e){}
-              }
               await AsyncStorage.removeItem('temp_cached_shorts');
-              Alert.alert("সফল", "১২ ঘণ্টার প্লে-হিস্ট্রি ক্যাশ মুছে ফেলা হয়েছে।");
+              Alert.alert("সফল", "২৪ ঘণ্টার প্লে-হিস্ট্রি ক্যাশ মুছে ফেলা হয়েছে।");
           }
           setShowSettingsModal(false);
           loadOfflineData();
@@ -290,7 +273,6 @@ const renderItem = ({ item, index }) => {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="transparent" translucent barStyle="light-content" />
       
-      {/* [NEW]: লাইভ ডাউনলোড প্রোগ্রেস টোস্ট */}
       {isBulkDownloading && (
           <View style={styles.progressToast}>
               <ActivityIndicator size="small" color="#FFF" style={{marginRight: 10}}/>
@@ -379,7 +361,7 @@ const renderItem = ({ item, index }) => {
                   <TouchableOpacity style={styles.deleteOptionBtn} onPress={() => clearDownloads('temp')}>
                       <Ionicons name="time-outline" size={24} color="#FF9800" />
                       <View style={{marginLeft: 15}}>
-                          <Text style={styles.deleteTitle}>Clear 12h Cache</Text>
+                          <Text style={styles.deleteTitle}>Clear 24h Cache</Text>
                           <Text style={styles.deleteSub}>Clear auto-saved watched videos</Text>
                       </View>
                   </TouchableOpacity>
