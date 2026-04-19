@@ -26,14 +26,14 @@ export default function ShortsScreen({ initialVideoId, route }) {
   const [customCount, setCustomCount] = useState('');
   
   const [isBulkDownloading, setIsBulkDownloading] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, percentage: 0 });
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => setIsOffline(!state.isConnected));
     return () => unsubscribe();
   }, []);
 
-  const fetchShorts = async (count = 3) => {
+  const fetchShorts = async (count = 5) => {
     if (isLoadingMore || isOffline) return;
     setIsLoadingMore(true);
     try {
@@ -44,6 +44,13 @@ export default function ShortsScreen({ initialVideoId, route }) {
                 const newShorts = data.shorts.filter(s => !prev.find(p => p.videoId === s.videoId));
                 return [...prev, ...newShorts];
             });
+        } else {
+            // সার্ভার রেডি না থাকলে ৩ সেকেন্ড পর আবার চেষ্টা করবে (যাতে ভিডিও ফুরিয়ে না যায়)
+            setTimeout(() => {
+                setIsLoadingMore(false);
+                fetchShorts(count);
+            }, 3000);
+            return;
         }
     } catch (e) {}
     setIsLoadingMore(false);
@@ -62,7 +69,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
   useEffect(() => {
     const initId = initialVideoId || route?.params?.videoId;
     if (initId && !isOffline) fetch(`${MY_API_SERVER}/api/add-shorts?ids=${initId}`).catch(()=>{});
-    if (!isOffline) fetchShorts(3); 
+    if (!isOffline) fetchShorts(5); 
     loadDownloadedData();
   }, []);
 
@@ -71,18 +78,20 @@ export default function ShortsScreen({ initialVideoId, route }) {
         const index = viewableItems[0].index;
         setVisibleIndex(index);
         
-        if (!isOffline && index > 0 && index >= shortsList.length - 2) {
-            fetchShorts(2);
+        // বর্তমান ভিডিওর কাছাকাছি এলেই নতুন ভিডিও সার্ভার থেকে আনবে
+        if (!isOffline && shortsList.length > 0 && index >= shortsList.length - 3) {
+            fetchShorts(3);
         }
     }
   }).current;
 
-  // [FIXED]: সার্ভারের মাধ্যমে নিরাপদ ম্যানুয়াল ডাউনলোড
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+
   const startBulkDownload = async (targetCount) => {
     if (!targetCount || isNaN(targetCount) || targetCount <= 0) return;
     setShowDownloadModal(false);
     setIsBulkDownloading(true);
-    setBulkProgress({ current: 0, total: targetCount });
+    setBulkProgress({ current: 0, total: targetCount, percentage: 0 });
 
     let downloaded = 0;
     let saved = await AsyncStorage.getItem('permanent_shorts');
@@ -97,7 +106,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
                 const item = data.shorts[0];
                 if (parsed.some(s => s.videoId === item.videoId)) continue;
 
-                // সার্ভারকে ডাউনলোড করতে বলা হচ্ছে এবং সার্ভার কনফার্মেশন দিলেই কেবল সেভ হবে
                 const dlRes = await fetch(`${MY_API_SERVER}/api/download-manual?id=${item.videoId}`);
                 const dlData = await dlRes.json();
                 
@@ -113,7 +121,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
         } catch (e) { break; }
     }
     setIsBulkDownloading(false);
-    Alert.alert("সফল", `${downloaded} টি ভিডিও ডাউনলোড হয়েছে।`);
+    Alert.alert("সফল", `${downloaded} টি ভিডিও অফলাইনের জন্য সেভ হয়েছে।`);
   };
 
   const deleteDownloads = async () => {
@@ -225,18 +233,15 @@ const renderItem = ({ item, index }) => {
       ) : (
           <FlatList
               data={isOffline ? downloadedShorts : shortsList}
-              keyExtractor={(item, index) => (item.videoId || index).toString()}
+              // [FIXED]: Index দিয়ে ইউনিক কি (key) সেট করা হয়েছে যাতে স্ক্রল করতে বাধা না দেয়
+              keyExtractor={(item, index) => `video_${item.videoId || index}_${index}`}
               renderItem={renderItem}
               pagingEnabled
               showsVerticalScrollIndicator={false}
               onViewableItemsChanged={onViewableItemsChanged}
-              // [FIXED]: এমবি বাঁচানোর মূল অস্ত্র (অ্যাডভান্স লোডিং বন্ধ)
-              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-              windowSize={2}
-              initialNumToRender={1}
-              maxToRenderPerBatch={1}
-              removeClippedSubviews={true}
+              viewabilityConfig={viewabilityConfig}
               bounces={false}
+              // [FIXED]: Flatlist optimization গুলো সরিয়ে দেওয়া হয়েছে যাতে একটার পর একটা ভিডিও স্ক্রল হয়
           />
       )}
 
