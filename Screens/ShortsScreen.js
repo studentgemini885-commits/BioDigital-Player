@@ -6,7 +6,7 @@ import { Video } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as FileSystem from 'expo-file-system'; 
-import { WebView } from 'react-native-webview'; // [NEW]: লুকানো ওয়েবভিউর জন্য
+import { WebView } from 'react-native-webview';
 
 const { width, height } = Dimensions.get('window');
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
@@ -34,20 +34,33 @@ export default function ShortsScreen({ initialVideoId, route }) {
     return () => unsubscribe();
   }, []);
 
+  // [FIXED]: শক্তিশালী Auto-Retry সিস্টেম (সার্ভার রেডি না হওয়া পর্যন্ত অপেক্ষা করবে)
   const fetchShorts = async (count = 3) => {
     if (isLoadingMore || isOffline) return;
     setIsLoadingMore(true);
     try {
         const res = await fetch(`${MY_API_SERVER}/api/get-shorts?count=${count}`);
         const data = await res.json();
-        if (data.success && data.shorts.length > 0) {
+        
+        if (data.success && data.shorts && data.shorts.length > 0) {
             setShortsList(prev => {
                 const newShorts = data.shorts.filter(s => !prev.find(p => p.videoId === s.videoId));
                 return [...prev, ...newShorts];
             });
+            setIsLoadingMore(false);
+        } else {
+            // ভিডিও রেডি না থাকলে ২.৫ সেকেন্ড পর আবার ট্রাই করবে
+            setTimeout(() => {
+                setIsLoadingMore(false);
+                fetchShorts(count);
+            }, 2500);
         }
-    } catch (e) {}
-    setIsLoadingMore(false);
+    } catch (e) {
+        setTimeout(() => {
+            setIsLoadingMore(false);
+            fetchShorts(count);
+        }, 3000);
+    }
   };
 
   const loadDownloadedData = async () => {
@@ -82,7 +95,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
-  // [NEW]: মূল অ্যাপ্লিকেশন (অতি দ্রুত) ২৪০p লিংকে ডাউনলোড করবে
   const startBulkDownload = async (targetCount) => {
     if (!targetCount || isNaN(targetCount) || targetCount <= 0) return;
     setShowDownloadModal(false);
@@ -95,7 +107,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
     while (downloaded < targetCount) {
         try {
-            // সার্ভার থেকে 240p ডাউনলোড লিংকসহ ভিডিও আনা হচ্ছে
             const res = await fetch(`${MY_API_SERVER}/api/get-shorts?count=1`);
             const data = await res.json();
 
@@ -105,9 +116,8 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
                 const fileUri = FileSystem.documentDirectory + `perm_${item.videoId}.mp4`;
                 
-                // অ্যাপ নিজে ডাইরেক্ট ডাউনলোড করছে (বিদ্যুৎ গতিতে)
                 const downloadResumable = FileSystem.createDownloadResumable(
-                    item.downloadUrl || item.url, // 240p লিংক
+                    item.downloadUrl || item.url, 
                     fileUri, {},
                     (p) => {
                         const progress = Math.round((p.totalBytesWritten / p.totalBytesExpectedToWrite) * 100);
@@ -144,7 +154,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
       } catch(e){}
   };
 
-  // [NEW]: লুকানো ওয়েবভিউ এমবি খরচ ঠেকাতে ভিডিও প্লে পজ করে দেবে এবং আইডি চুরি করবে
   const hiddenScraperJS = `
     const style = document.createElement('style');
     style.innerHTML = 'video { display: none !important; }';
@@ -156,7 +165,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
         videos.forEach(v => {
             if(v.src) {
                 v.pause();
-                v.removeAttribute('src'); // বাফারিং সম্পূর্ণ বন্ধ করবে
+                v.removeAttribute('src'); 
                 v.load();
             }
         });
@@ -165,7 +174,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
         if(match && match[1] && !seenIds[match[1]]) {
             seenIds[match[1]] = true;
             window.ReactNativeWebView.postMessage(match[1]);
-            window.scrollBy(0, window.innerHeight); // পরের ভিডিওতে স্ক্রল করবে
+            window.scrollBy(0, window.innerHeight); 
         }
     }, 1500);
     true;
@@ -242,7 +251,6 @@ const renderItem = ({ item, index }) => {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="transparent" translucent barStyle="light-content" />
       
-      {/* [NEW]: লুকানো WebView যা ব্যাকগ্রাউন্ডে কাজ করবে এমবি না কেটে */}
       {!isOffline && (
         <View style={{ width: 0, height: 0, opacity: 0 }} pointerEvents="none">
             <WebView 
