@@ -36,18 +36,21 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   const targetUri = initialVideoId || route?.params?.videoId ? `https://m.youtube.com/shorts/${initialVideoId || route?.params?.videoId}` : "https://m.youtube.com/shorts";
 
-  // কোয়ালিটি সেট করার ফাংশন
+  // [UPDATED]: কোয়ালিটি সেট করার ফাংশন (State Closure বাগ ফিক্স করা হয়েছে)
   const applyQualitySettings = (qualityVal) => {
     let newUA = UAS.normal;
     if (qualityVal === 'anti') newUA = UAS.anti;
     else if (qualityVal === 'low') newUA = UAS.low;
     else if (qualityVal === 'high') newUA = UAS.high;
 
-    // যদি নতুন ইউজার-এজেন্ট সিলেক্ট হয়, তবেই WebView রিস্টার্ট করবে
-    if (newUA !== deviceUserAgent) {
-      setDeviceUserAgent(newUA);
-      setWebviewKey(Date.now().toString()); 
-    }
+    setDeviceUserAgent(prevUA => {
+      // যদি নতুন ইউজার-এজেন্ট আগেরটির চেয়ে আলাদা হয়, তবেই রিস্টার্ট করবে
+      if (prevUA !== newUA) {
+        setWebviewKey(Date.now().toString()); 
+        return newUA;
+      }
+      return prevUA;
+    });
   };
 
   // সেটিং স্ক্রিন থেকে সিগন্যাল রিসিভ করা এবং স্টোরেজ চেক করা
@@ -68,7 +71,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
     return () => {
       subscription.remove();
     };
-  }, [isFocused, deviceUserAgent]);
+  }, [isFocused]); // ডিপেন্ডেন্সি থেকে deviceUserAgent সরিয়ে দেওয়া হয়েছে যাতে লুপ তৈরি না হয়
 
   const restartActionTimer = () => {
     setShowActionBtns(false);
@@ -133,7 +136,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
     }
   };
 
-  // ক্র্যাশ-প্রুফ ইনজেক্টেড স্ক্রিপ্ট (কোনো লেয়ার বা অবাঞ্ছিত বাটন নেই)
   const shortsInjectScript = `
     (function() {
         try {
@@ -240,10 +242,11 @@ export default function ShortsScreen({ initialVideoId, route }) {
         javaScriptEnabled={true} 
         onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
         containerStyle={{ flex: 1 }} 
+        incognito={true} /* [CRITICAL FIX]: কুকি সেভ হওয়া বন্ধ করবে */
+        cacheEnabled={false} /* [CRITICAL FIX]: আগের ইউজার-এজেন্ট ধরে রাখবে না */
+        cacheMode="LOAD_NO_CACHE"
       />
       
-      {/* অপ্রয়োজনীয় PanResponder এবং অদৃশ্য লেয়ারগুলো পুরোপুরি রিমুভ করা হয়েছে */}
-
       {showActionBtns && currentChannel.name !== '' && currentChannel.name !== 'Unknown Channel' && (
         <View style={styles.actionRowContainer} pointerEvents="box-none">
             <TouchableOpacity 
@@ -285,7 +288,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
   );
 }
 
-// স্টাইলশীট থেকে অপ্রয়োজনীয় লেয়ারগুলোর কোড মুছে ফেলা হয়েছে
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
