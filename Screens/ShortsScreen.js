@@ -6,6 +6,7 @@ import { Video } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as FileSystem from 'expo-file-system'; 
+import { WebView } from 'react-native-webview'; // [NEW]: লুকানো ওয়েবভিউর জন্য
 
 const { width, height } = Dimensions.get('window');
 const MY_API_SERVER = "http://127.0.0.1:10000"; 
@@ -33,7 +34,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
     return () => unsubscribe();
   }, []);
 
-  const fetchShorts = async (count = 5) => {
+  const fetchShorts = async (count = 3) => {
     if (isLoadingMore || isOffline) return;
     setIsLoadingMore(true);
     try {
@@ -44,13 +45,6 @@ export default function ShortsScreen({ initialVideoId, route }) {
                 const newShorts = data.shorts.filter(s => !prev.find(p => p.videoId === s.videoId));
                 return [...prev, ...newShorts];
             });
-        } else {
-            // সার্ভার রেডি না থাকলে ৩ সেকেন্ড পর আবার চেষ্টা করবে (যাতে ভিডিও ফুরিয়ে না যায়)
-            setTimeout(() => {
-                setIsLoadingMore(false);
-                fetchShorts(count);
-            }, 3000);
-            return;
         }
     } catch (e) {}
     setIsLoadingMore(false);
@@ -60,7 +54,13 @@ export default function ShortsScreen({ initialVideoId, route }) {
     try {
         let saved = await AsyncStorage.getItem('permanent_shorts');
         let parsed = saved ? JSON.parse(saved) : [];
-        setDownloadedShorts(parsed);
+        const validList = [];
+        for (const item of parsed) {
+            const fileInfo = await FileSystem.getInfoAsync(item.uri);
+            if(fileInfo.exists) validList.push(item);
+        }
+        setDownloadedShorts(validList);
+        if (validList.length !== parsed.length) await AsyncStorage.setItem('permanent_shorts', JSON.stringify(validList));
     } catch (e) {}
   };
 
@@ -75,18 +75,14 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0) {
-        const index = viewableItems[0].index;
-        setVisibleIndex(index);
-        
-        // বর্তমান ভিডিওর কাছাকাছি এলেই নতুন ভিডিও সার্ভার থেকে আনবে
-        if (!isOffline && shortsList.length > 0 && index >= shortsList.length - 3) {
-            fetchShorts(3);
-        }
+        setVisibleIndex(viewableItems[0].index);
+        if (!isOffline && viewableItems[0].index >= shortsList.length - 2) fetchShorts(3);
     }
   }).current;
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
+  // [NEW]: মূল অ্যাপ্লিকেশন (অতি দ্রুত) ২৪০p লিংকে ডাউনলোড করবে
   const startBulkDownload = async (targetCount) => {
     if (!targetCount || isNaN(targetCount) || targetCount <= 0) return;
     setShowDownloadModal(false);
@@ -99,6 +95,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
 
     while (downloaded < targetCount) {
         try {
+            // সার্ভার থেকে 240p ডাউনলোড লিংকসহ ভিডিও আনা হচ্ছে
             const res = await fetch(`${MY_API_SERVER}/api/get-shorts?count=1`);
             const data = await res.json();
 
@@ -106,13 +103,22 @@ export default function ShortsScreen({ initialVideoId, route }) {
                 const item = data.shorts[0];
                 if (parsed.some(s => s.videoId === item.videoId)) continue;
 
-                const dlRes = await fetch(`${MY_API_SERVER}/api/download-manual?id=${item.videoId}`);
-                const dlData = await dlRes.json();
+                const fileUri = FileSystem.documentDirectory + `perm_${item.videoId}.mp4`;
                 
-                if (dlData.success && dlData.localUrl) {
-                    parsed.push({ ...item, uri: dlData.localUrl, isPermanent: true });
+                // অ্যাপ নিজে ডাইরেক্ট ডাউনলোড করছে (বিদ্যুৎ গতিতে)
+                const downloadResumable = FileSystem.createDownloadResumable(
+                    item.downloadUrl || item.url, // 240p লিংক
+                    fileUri, {},
+                    (p) => {
+                        const progress = Math.round((p.totalBytesWritten / p.totalBytesExpectedToWrite) * 100);
+                        setBulkProgress({ current: downloaded + 1, total: targetCount, percentage: progress });
+                    }
+                );
+
+                const dlResult = await downloadResumable.downloadAsync();
+                if (dlResult.status === 200) {
+                    parsed.push({ ...item, uri: dlResult.uri, isPermanent: true });
                     downloaded++;
-                    setBulkProgress({ current: downloaded, total: targetCount });
                     await AsyncStorage.setItem('permanent_shorts', JSON.stringify(parsed));
                 }
             } else {
@@ -121,7 +127,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
         } catch (e) { break; }
     }
     setIsBulkDownloading(false);
-    Alert.alert("সফল", `${downloaded} টি ভিডিও অফলাইনের জন্য সেভ হয়েছে।`);
+    Alert.alert("সফল", `${downloaded} টি শর্টস অফলাইনের জন্য সেভ হয়েছে।`);
   };
 
   const deleteDownloads = async () => {
@@ -129,9 +135,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
           let saved = await AsyncStorage.getItem('permanent_shorts');
           let parsed = saved ? JSON.parse(saved) : [];
           for(const item of parsed) {
-              const fileName = `perm_${item.videoId}.mp4`;
-              const filePath = `/storage/emulated/0/MyTube/ShortsCache/${fileName}`;
-              try { await FileSystem.deleteAsync(`file://${filePath}`, {idempotent: true}); } catch(e){}
+              try { await FileSystem.deleteAsync(item.uri, {idempotent: true}); } catch(e){}
           }
           await AsyncStorage.removeItem('permanent_shorts');
           setDownloadedShorts([]);
@@ -139,6 +143,33 @@ export default function ShortsScreen({ initialVideoId, route }) {
           Alert.alert("সফল", "সব ডাউনলোড মুছে ফেলা হয়েছে।");
       } catch(e){}
   };
+
+  // [NEW]: লুকানো ওয়েবভিউ এমবি খরচ ঠেকাতে ভিডিও প্লে পজ করে দেবে এবং আইডি চুরি করবে
+  const hiddenScraperJS = `
+    const style = document.createElement('style');
+    style.innerHTML = 'video { display: none !important; }';
+    document.head.appendChild(style);
+
+    let seenIds = {};
+    setInterval(() => {
+        const videos = document.querySelectorAll('video');
+        videos.forEach(v => {
+            if(v.src) {
+                v.pause();
+                v.removeAttribute('src'); // বাফারিং সম্পূর্ণ বন্ধ করবে
+                v.load();
+            }
+        });
+
+        const match = window.location.href.match(/\\/shorts\\/([a-zA-Z0-9_-]+)/);
+        if(match && match[1] && !seenIds[match[1]]) {
+            seenIds[match[1]] = true;
+            window.ReactNativeWebView.postMessage(match[1]);
+            window.scrollBy(0, window.innerHeight); // পরের ভিডিওতে স্ক্রল করবে
+        }
+    }, 1500);
+    true;
+  `;
 const renderItem = ({ item, index }) => {
       const isPlaying = index === visibleIndex && isFocused;
       const videoUri = isOffline ? item.uri : item.url;
@@ -211,11 +242,26 @@ const renderItem = ({ item, index }) => {
     <SafeAreaView style={styles.container}>
       <StatusBar backgroundColor="transparent" translucent barStyle="light-content" />
       
+      {/* [NEW]: লুকানো WebView যা ব্যাকগ্রাউন্ডে কাজ করবে এমবি না কেটে */}
+      {!isOffline && (
+        <View style={{ width: 0, height: 0, opacity: 0 }} pointerEvents="none">
+            <WebView 
+                source={{ uri: 'https://m.youtube.com/shorts' }}
+                injectedJavaScript={hiddenScraperJS}
+                javaScriptEnabled={true}
+                onMessage={(event) => {
+                    const extractedId = event.nativeEvent.data;
+                    if(extractedId) fetch(`${MY_API_SERVER}/api/add-shorts?ids=${extractedId}`).catch(()=>{});
+                }}
+            />
+        </View>
+      )}
+
       {isBulkDownloading && (
           <View style={styles.progressToast}>
               <ActivityIndicator size="small" color="#FFF" style={{marginRight: 10}}/>
               <Text style={styles.progressText}>
-                 ডাউনলোড হচ্ছে... {bulkProgress.current} / {bulkProgress.total}
+                 ডাউনলোড হচ্ছে... {bulkProgress.current} / {bulkProgress.total} ({bulkProgress.percentage}%)
               </Text>
           </View>
       )}
@@ -233,19 +279,20 @@ const renderItem = ({ item, index }) => {
       ) : (
           <FlatList
               data={isOffline ? downloadedShorts : shortsList}
-              // [FIXED]: Index দিয়ে ইউনিক কি (key) সেট করা হয়েছে যাতে স্ক্রল করতে বাধা না দেয়
-              keyExtractor={(item, index) => `video_${item.videoId || index}_${index}`}
+              keyExtractor={(item, index) => (item.videoId || index).toString()}
               renderItem={renderItem}
               pagingEnabled
               showsVerticalScrollIndicator={false}
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={viewabilityConfig}
+              windowSize={2}
+              initialNumToRender={1}
+              maxToRenderPerBatch={1}
+              removeClippedSubviews={true}
               bounces={false}
-              // [FIXED]: Flatlist optimization গুলো সরিয়ে দেওয়া হয়েছে যাতে একটার পর একটা ভিডিও স্ক্রল হয়
           />
       )}
 
-      {/* Download Modal */}
       <Modal visible={showDownloadModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -263,7 +310,6 @@ const renderItem = ({ item, index }) => {
           </View>
       </Modal>
 
-      {/* Settings Modal */}
       <Modal visible={showSettingsModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
