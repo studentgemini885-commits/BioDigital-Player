@@ -116,77 +116,56 @@ export default function ShortsScreen({ initialVideoId, route }) {
     })
   ).current;
 
-  // আপডেট করা ইনজেক্টেড স্ক্রিপ্ট (MutationObserver এবং Aria-label সহ)
+  // আপডেট করা ইনজেক্টেড স্ক্রিপ্ট (সব বাটন গায়েব করার ব্রহ্মাস্ত্র)
   const shortsInjectScript = `
     (function() {
-        // ১. অত্যন্ত শক্তিশালী CSS ইনজেকশন
+        // ১. CSS এর মাধ্যমে সব ওভারলে এবং বাটন গায়েব করা
         const style = document.createElement('style');
         style.innerHTML = \`
             ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, header, .ytm-bottom-sheet { display: none !important; }
             ytm-ad-slot-renderer, ytm-promoted-sparkles-web-renderer, .ad-showing, .ad-interrupting, [is-ad], ytm-companion-ad-renderer { display: none !important; opacity: 0 !important; pointer-events: none !important; }
-            .reel-player-header-subscribe-button, .ytm-subscribe-button-renderer { opacity: 0 !important; pointer-events: none !important; display: none !important; }
             
-            /* লাইক, কমেন্ট, শেয়ার বাটন হাইড করার অ্যাগ্রেসিভ CSS */
+            /* ডানদিকের সম্পূর্ণ প্যানেল এবং ভিডিওর ওপরের সব বাটন গায়েব করার ব্রহ্মাস্ত্র */
+            ytm-reel-player-overlay-renderer,
             ytm-reel-player-overlay-actions, 
             .reel-player-overlay-actions,
-            [class*="reel-player-overlay-action"],
-            ytm-like-button-renderer,
-            ytm-dislike-button-renderer,
-            ytm-comment-button-renderer,
-            ytm-share-button-renderer,
-            ytm-remix-button-renderer,
-            .ytm-reel-player-overlay-actions,
-            [aria-label*="Like" i],
-            [aria-label*="Dislike" i],
-            [aria-label*="Comment" i],
-            [aria-label*="Share" i],
-            [aria-label*="লাইক" i],
-            [aria-label*="কমেন্ট" i],
-            [aria-label*="শেয়ার" i] { 
+            [class*="overlay-action"],
+            [class*="action-button"],
+            ytm-reel-video-renderer button, 
+            ytm-reel-video-renderer ytm-button-renderer { 
                 display: none !important; 
                 opacity: 0 !important; 
                 pointer-events: none !important; 
-                visibility: hidden !important;
+                visibility: hidden !important; 
                 width: 0 !important;
                 height: 0 !important;
             }
         \`;
         document.documentElement.appendChild(style);
 
-        // ২. বাটনগুলো জোরপূর্বক রিমুভ করার ফাংশন
-        const nukeActionButtons = () => {
-            const selectors = [
-                'ytm-reel-player-overlay-actions',
-                '.reel-player-overlay-actions',
-                'ytm-like-button-renderer',
-                'ytm-comment-button-renderer',
-                'ytm-share-button-renderer',
-                '[aria-label*="Like"]',
-                '[aria-label*="Comment"]',
-                '[aria-label*="Share"]'
-            ];
+        // ২. জাভাস্ক্রিপ্ট দিয়ে ভিডিওর ভেতরের সব বাটন মুছে ফেলা
+        const nukeAllButtons = () => {
+            let activeReel = document.querySelector('ytm-reel-video-renderer[is-active]') || document;
             
-            selectors.forEach(selector => {
-                const elements = document.querySelectorAll(selector);
-                for (let i = 0; i < elements.length; i++) {
-                    elements[i].style.setProperty('display', 'none', 'important');
-                    elements[i].style.setProperty('opacity', '0', 'important');
-                    elements[i].style.setProperty('pointer-events', 'none', 'important');
-                }
-            });
+            // Shorts এর ভেতরে থাকা যেকোনো বাটন বা অ্যাকশন প্যানেল খুঁজে বের করা
+            let allButtons = activeReel.querySelectorAll('button, ytm-button-renderer, ytm-like-button-renderer, ytm-comment-button-renderer, ytm-share-button-renderer, ytm-reel-player-overlay-actions, ytm-reel-player-overlay-renderer');
+            
+            for(let i = 0; i < allButtons.length; i++) {
+                allButtons[i].style.setProperty('display', 'none', 'important');
+                allButtons[i].style.setProperty('opacity', '0', 'important');
+                allButtons[i].style.setProperty('pointer-events', 'none', 'important');
+            }
         };
 
-        // ৩. DOM পরিবর্তনের উপর নজর রাখা (MutationObserver)
-        const observer = new MutationObserver(() => {
-            nukeActionButtons();
-        });
+        // ৩. পেজে কোনো নতুন বাটন এলেই সাথে সাথে তা মুছে দেবে
+        const observer = new MutationObserver(() => nukeAllButtons());
         observer.observe(document.body, { childList: true, subtree: true });
 
         let activeVideoId = "";
 
-        // ৪. আপনার আগের লজিক (অ্যাড স্কিপ, চ্যানেল সিঙ্ক ইত্যাদি)
+        // ৪. আপনার বাকি লজিকগুলো
         setInterval(() => {
-            nukeActionButtons(); // ব্যাকআপ হিসেবে এখানেও কল করা হলো
+            nukeAllButtons(); // ব্যাকআপ হিসেবে এখানেও কল করা হলো
 
             let activeReel = document.querySelector('ytm-reel-video-renderer[is-active]');
             if (!activeReel) {
@@ -233,6 +212,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
                 }
             }
 
+            // অ্যাড স্কিপ লজিক
             const skipBtn = document.querySelector('.ytp-ad-skip-button') || document.querySelector('.ytp-skip-ad-button');
             if (skipBtn) skipBtn.click();
             
@@ -319,6 +299,7 @@ export default function ShortsScreen({ initialVideoId, route }) {
         javaScriptEnabled={true} 
         onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
         containerStyle={{ flex: 1 }} 
+        incognito={true} /* ক্যাশ সমস্যা এড়াতে চাইলে এটি ব্যবহার করতে পারেন */
       />
       
       <View style={styles.bottomLayer} {...panResponder.panHandlers} />
