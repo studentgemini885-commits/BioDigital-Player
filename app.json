@@ -8,6 +8,7 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "jsEngine": "jsc",
+    "scheme": "biodigital",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -15,7 +16,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.imtiaz.biodigitaltruth"
+      "bundleIdentifier": "com.imtiaz.biodigitaltruth",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -26,7 +32,12 @@
       "permissions": [
         "WRITE_EXTERNAL_STORAGE",
         "READ_EXTERNAL_STORAGE",
-        "NOTIFICATIONS"
+        "READ_MEDIA_AUDIO",
+        "READ_MEDIA_VIDEO",
+        "NOTIFICATIONS",
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -36,7 +47,18 @@
       "expo-notifications",
       "expo-media-library",
       "expo-file-system",
-      "expo-navigation-bar"
+      "expo-navigation-bar",
+      "expo-av",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34
+          }
+        }
+      ]
     ]
   }
 }
