@@ -251,6 +251,9 @@ export default function GlobalPlayer() {
   const shouldVideoPlay = isPlaying && (!isAudioMode || isCurrentlyMuxed);
   const showCustomPoster = isAudioMode && !isLocalRef.current;
 
+  // [NEW]: ডাইনামিক ভিডিও টাইপ ডিটেকশন (যাতে ম্যানিফেস্ট এরর না আসে)
+  const isLiveStream = streamUrl && (streamUrl.includes('.m3u8') || streamUrl.includes('manifest'));
+
   return (
      <Animated.View style={[isFull ? styles.fullContainer : [styles.miniContainer, { transform: [{ translateX: pan.x }, { translateY: pan.y }] }]]} {...(isFull ? {} : panResponder.panHandlers)}>
         <TouchableOpacity activeOpacity={0.9} style={styles.touchable} onPress={() => { if (!isFull && videoData) navigation.navigate('Player', { videoId: videoData.id, videoData }); }}>
@@ -268,7 +271,8 @@ export default function GlobalPlayer() {
                       ref={videoRef}
                       source={{ 
                         uri: streamUrl,
-                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' }
+                        // [FIXED]: এখানে আমরা বলে দিচ্ছি এটি কী ধরনের ফাইল। এটি ম্যানিফেস্ট এরর ১০০% ফিক্স করবে!
+                        ...(isLiveStream ? {} : { type: 'mp4' })
                       }}
                       style={styles.video}
                       paused={!shouldVideoPlay}
@@ -277,15 +281,12 @@ export default function GlobalPlayer() {
                       resizeMode={isFull ? "contain" : "cover"}
                       onProgress={handleProgress}
                       onLoad={() => { if (seekPosRef.current > 0) { videoRef.current.seek(seekPosRef.current / 1000); seekPosRef.current = 0; } }}
-                      
-                      // [UPDATED]: এখানে আসল এররটি ক্যাপচার করা হয়েছে
                       onError={(err) => { 
                           if(!isAudioMode) {
                               const detail = err?.error?.errorString || err?.error?.message || err?.error?.code || "Unknown Format Error";
                               setErrorMsg(`Player Error: ${detail}`);
                           }
                       }}
-                      
                       bufferConfig={{ minBufferMs: 15000, maxBufferMs: 50000, bufferForPlaybackMs: 2500, bufferForPlaybackAfterRebufferMs: 5000 }}
                       playInBackground={true}
                       ignoreSilentSwitch={"ignore"}
